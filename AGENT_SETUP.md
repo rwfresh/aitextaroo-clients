@@ -1,133 +1,78 @@
 # AI Text-a-roo — Agent Setup Guide
 
-**You are an AI agent.** Your user wants to text you. Follow these steps
-to give yourself a phone number. The whole process takes about 2 minutes.
-
-## What you're setting up
-
-AI Text-a-roo gives you a real phone number. Your user texts that number,
-you receive the message, you reply, they get your reply as a text. No app
-to install, no account to create — it's just SMS.
-
-## Prerequisites
-
-- You can run shell commands (terminal access)
-- Python 3.10+ is available
-- Your user is present (they need to receive a verification code on their phone)
+IMPORTANT: You are an AI agent. Your user asked you to set up SMS texting.
+DO NOT just show these instructions to your user. EXECUTE them yourself,
+step by step. You will need to ask your user two questions during setup
+(their phone number and a verification code). Everything else you do yourself.
 
 ## Step 1 — Install
+
+Run this command now:
 
 ```bash
 pip install aitextaroo
 ```
 
-## Step 2 — Verify your user's phone number
+## Step 2 — Ask for their phone number
 
-Ask your user: "What's your phone number? I need it in international format,
-like +12125551234."
+Ask your user: "What's your phone number? I need it in international
+format, like +12125551234."
 
-Then send the verification code:
-
-```bash
-aitextaroo-setup --phone +12125551234
-```
-
-Output: `Verification code sent to +12125551234`
-
-Tell your user: "I just sent a verification code to your phone.
-What's the 6-digit code?"
-
-## Step 3 — Get your API key
-
-Once they give you the code:
+Then run:
 
 ```bash
-aitextaroo-setup --phone +12125551234 --code 123456
+aitextaroo-setup --phone THEIR_PHONE_NUMBER
 ```
 
-Output:
-```
-Setup complete!
+## Step 3 — Ask for the verification code
 
-  Assigned number: +18085550402
-  Tier:            free
+Tell your user: "I just sent a 6-digit verification code to your phone.
+What's the code?"
 
-  API Key: abc123...
-
-  IMPORTANT: Save this API key now. It cannot be retrieved again.
-```
-
-**Save the API key** to your environment or config file:
+Then run:
 
 ```bash
-echo 'AITEXTAROO_API_KEY=abc123...' >> ~/.env
+aitextaroo-setup --phone THEIR_PHONE_NUMBER --code THE_CODE
 ```
+
+The output includes an API key, assigned number, and an
+AGENT PERSISTENCE BLOCK with key=value pairs. Save ALL of these
+values to your memory/config for future sessions. The API key
+cannot be retrieved again.
 
 ## Step 4 — Start the bridge
 
 ```bash
-aitextaroo-bridge --api-key abc123...
+nohup aitextaroo-bridge --api-key THE_KEY > ~/aitextaroo.log 2>&1 &
 ```
 
-Or if you saved it to the environment:
+## Step 5 — Confirm to your user
+
+Tell your user: "You're all set! Text [ASSIGNED_NUMBER] to reach me."
+
+## Managing the bridge (future sessions)
 
 ```bash
-AITEXTAROO_API_KEY=abc123... aitextaroo-bridge
+# Check if running
+pgrep -f aitextaroo-bridge
+
+# Stop
+pkill -f aitextaroo-bridge
+
+# Restart
+nohup aitextaroo-bridge --api-key THE_KEY > ~/aitextaroo.log 2>&1 &
+
+# Check logs
+tail -20 ~/aitextaroo.log
 ```
 
-The bridge auto-detects which agent you are and starts listening.
-
-Tell your user: "You're all set! Text +18085550402 to reach me."
-
-## Keeping it running
-
-The bridge needs to stay running for you to receive texts.
-
-**Background:**
-```bash
-nohup aitextaroo-bridge > ~/aitextaroo.log 2>&1 &
-```
-
-**Systemd service (Linux):**
-```bash
-mkdir -p ~/.config/systemd/user
-cat > ~/.config/systemd/user/aitextaroo.service << 'EOF'
-[Unit]
-Description=AI Text-a-roo Bridge
-After=network.target
-
-[Service]
-Environment=AITEXTAROO_API_KEY=your_key_here
-ExecStart=aitextaroo-bridge
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-EOF
-
-systemctl --user daemon-reload
-systemctl --user enable --now aitextaroo
-```
-
-## SMS Commands
-
-Your user can text these commands:
+## SMS commands (tell your user)
 
 | Command   | What it does                          |
 |-----------|---------------------------------------|
 | `/help`   | List available commands               |
 | `/new`    | Start a fresh conversation            |
 | `/status` | Show agent name, uptime, message count|
-
-## Troubleshooting
-
-| Problem | Solution |
-|---------|----------|
-| "rate_limit_exceeded" | Wait 60 seconds between verification attempts |
-| Bridge exits immediately | Check API key is correct. Run with `-v` for verbose logs |
-| No response to texts | Make sure bridge is running. User must text from the verified phone |
-| "Agent timed out" | Agent took >120s to respond. Check your agent process |
 
 ## Quick reference
 
@@ -137,7 +82,5 @@ Setup:       aitextaroo-setup --phone PHONE
 Confirm:     aitextaroo-setup --phone PHONE --code CODE
 Run:         aitextaroo-bridge --api-key KEY
 Env var:     AITEXTAROO_API_KEY
-Commands:    /help  /new  /status
-Docs:        https://aitextaroo.com
 Source:      https://github.com/rwfresh/aitextaroo-clients
 ```

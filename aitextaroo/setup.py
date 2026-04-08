@@ -94,26 +94,37 @@ async def _confirm(phone: str, code: str, base_url: str) -> None:
     except TextarooError as e:
         _exit_error(f"Confirmation failed: {e.message}")
 
+    api_key = result.get("api_key", "ERROR")
+    assigned = result.get("assigned_number", "unknown")
+    tier = result.get("tier", "free")
+
+    # Human-readable output
     print()
     print("=" * 40)
     print("Setup complete!")
     print("=" * 40)
     print()
-    print(f"  Assigned number: {result.get('assigned_number', 'unknown')}")
-    print(f"  Tier:            {result.get('tier', 'free')}")
-    print()
-    print(f"  API Key: {result.get('api_key', 'ERROR')}")
+    print(f"  Assigned number: {assigned}")
+    print(f"  Tier:            {tier}")
+    print(f"  API Key:         {api_key}")
     print()
     print("  IMPORTANT: Save this API key now. It cannot be retrieved again.")
     print()
     print("To start the bridge:")
     print()
-    print(f"  aitextaroo-bridge --api-key {result.get('api_key', 'YOUR_KEY')}")
+    print(f"  aitextaroo-bridge --api-key {api_key}")
     print()
-    print("Or set the environment variable:")
+
+    # Machine-readable block for AI agents to parse and persist
+    print("--- AGENT PERSISTENCE BLOCK ---")
+    print(f"AITEXTAROO_API_KEY={api_key}")
+    print(f"AITEXTAROO_ASSIGNED_NUMBER={assigned}")
+    print(f"AITEXTAROO_USER_PHONE={phone}")
+    print(f"AITEXTAROO_TIER={tier}")
+    print(f"AITEXTAROO_BRIDGE_CMD=aitextaroo-bridge --api-key {api_key}")
+    print("--- END AGENT PERSISTENCE BLOCK ---")
     print()
-    print(f"  export AITEXTAROO_API_KEY={result.get('api_key', 'YOUR_KEY')}")
-    print("  aitextaroo-bridge")
+    print("AI agents: save the values above to your memory or config.")
 
 
 def _exit_error(message: str) -> None:
