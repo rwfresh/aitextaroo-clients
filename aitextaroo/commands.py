@@ -40,7 +40,7 @@ class CommandRouter:
 
         self._commands: dict[str, tuple[str, Callable[[], str]]] = {
             "help": ("List commands", self._cmd_help),
-            "new": ("Start a new conversation", self._cmd_new),
+            "new": ("Start a new conversation (old one is saved)", self._cmd_new),
             "status": ("Show bridge status", self._cmd_status),
         }
 
@@ -84,6 +84,9 @@ class CommandRouter:
 
     def _cmd_new(self) -> str:
         self._conversation.clear()
+        session_id = self._conversation.session_id
+        if session_id:
+            return f"New session started ({session_id}). Fresh start!"
         return "Conversation cleared. Fresh start!"
 
     def _cmd_status(self) -> str:
@@ -98,9 +101,17 @@ class CommandRouter:
         else:
             uptime_str = f"{seconds}s"
 
-        return (
-            f"Agent: {self._agent_name}\n"
-            f"Uptime: {uptime_str}\n"
-            f"Messages: {self._message_count}\n"
-            f"History: {self._conversation.count} messages"
-        )
+        parts = [
+            f"Agent: {self._agent_name}",
+            f"Uptime: {uptime_str}",
+            f"Messages: {self._message_count}",
+            f"History: {self._conversation.count} messages",
+        ]
+
+        session_id = self._conversation.session_id
+        if session_id:
+            parts.append(f"Session: {session_id}")
+            session_count = self._conversation.session_count()
+            parts.append(f"Sessions on disk: {session_count}")
+
+        return "\n".join(parts)
