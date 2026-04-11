@@ -220,6 +220,59 @@ class TestPersistentConversation:
         assert conv.is_empty
         assert conv.session_id == "empty123"
 
+    def test_cleanup_deletes_old_sessions(self, tmp_path) -> None:
+        import os
+        import time
+
+        # Create old session (mtime set to 100 days ago)
+        old_file = tmp_path / "old12345.jsonl"
+        old_file.write_text('{"role": "user", "text": "old", "ts": 1.0}\n')
+        old_time = time.time() - (100 * 86400)
+        os.utime(old_file, (old_time, old_time))
+
+        # Create recent session
+        recent_file = tmp_path / "recent12.jsonl"
+        recent_file.write_text('{"role": "user", "text": "new", "ts": 2.0}\n')
+
+        conv = Conversation.load_latest(tmp_path, retention_days=90)
+        assert not old_file.exists()
+        assert recent_file.exists()
+        assert conv.messages[0].text == "new"
+
+    def test_cleanup_disabled_with_zero(self, tmp_path) -> None:
+        import os
+        import time
+
+        old_file = tmp_path / "old12345.jsonl"
+        old_file.write_text('{"role": "user", "text": "old", "ts": 1.0}\n')
+        old_time = time.time() - (200 * 86400)
+        os.utime(old_file, (old_time, old_time))
+
+        Conversation.load_latest(tmp_path, retention_days=0)
+        assert old_file.exists()
+
+    def test_tmp_file_cleaned_up_after_write(self, tmp_path) -> None:
+        conv = Conversation(max_messages=20, sessions_dir=tmp_path)
+        conv.add_user_message("test")
+
+        tmp_files = list(tmp_path.glob("*.tmp"))
+        assert len(tmp_files) == 0
+
+    def test_fsync_produces_valid_jsonl(self, tmp_path) -> None:
+        conv = Conversation(max_messages=20, sessions_dir=tmp_path)
+        conv.add_user_message("msg1")
+        conv.add_assistant_message("msg2")
+        conv.add_user_message("msg3")
+
+        # Read back and verify every line is valid JSON
+        session_file = tmp_path / f"{conv.session_id}.jsonl"
+        lines = session_file.read_text().strip().splitlines()
+        assert len(lines) == 3
+        for line in lines:
+            data = json.loads(line)
+            assert "role" in data
+            assert "text" in data
+
 
 class TestMessage:
     """Message serialization."""

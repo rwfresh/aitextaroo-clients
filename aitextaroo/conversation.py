@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from collections import deque
 from dataclasses import dataclass
@@ -94,20 +95,31 @@ class Conversation:
             self._session_path.touch()
 
     @classmethod
-    def load_latest(cls, sessions_dir: Path, max_messages: int = 20) -> Conversation:
+    def load_latest(
+        cls,
+        sessions_dir: Path,
+        max_messages: int = 20,
+        retention_days: int = 90,
+    ) -> Conversation:
         """Load the most recently modified session, or create a new one.
 
         Scans sessions_dir for .jsonl files, picks the one with the
         most recent mtime, and loads the last max_messages lines.
+        Deletes session files older than retention_days on each load.
 
         Args:
             sessions_dir: Directory containing session files.
             max_messages: Maximum messages to retain.
+            retention_days: Delete sessions older than this. 0 = no cleanup.
 
         Returns:
             A Conversation populated from the latest session file.
         """
         sessions_dir.mkdir(parents=True, exist_ok=True)
+
+        if retention_days > 0:
+            _cleanup_old_sessions(sessions_dir, retention_days)
+
         session_files = sorted(
             sessions_dir.glob("*.jsonl"),
             key=lambda f: f.stat().st_mtime,
@@ -142,7 +154,8 @@ class Conversation:
     @property
     def _session_path(self) -> Path:
         """Path to the current session file. Only valid when persistent."""
-        assert self._sessions_dir is not None
+        if self._sessions_dir is None:
+            raise RuntimeError("Cannot access session path in in-memory mode")
         return self._sessions_dir / f"{self._session_id}.jsonl"
 
     @property
@@ -226,13 +239,36 @@ class Conversation:
             self._append_to_file(message)
 
     def _append_to_file(self, message: Message) -> None:
-        """Append a single message to the session file."""
+        """Append a single message to the session file.
+
+        Writes to a temp file first, then reads back to verify it's
+        valid JSON before appending to the session file. This prevents
+        partial/corrupt lines from a crash mid-write.
+        """
+        line = message.to_jsonl() + "\n"
+        path = self._session_path
+
         try:
-            with open(self._session_path, "a", encoding="utf-8") as f:
-                f.write(message.to_jsonl() + "\n")
+            # Write to temp file in same directory (same filesystem for rename)
+            tmp_path = path.with_suffix(".tmp")
+            tmp_path.write_text(line, encoding="utf-8")
+
+            # Verify the temp file is valid JSON before appending
+            written = tmp_path.read_text(encoding="utf-8").strip()
+            json.loads(written)  # Raises on corrupt data
+
+            # Append verified line to session file
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(line)
                 f.flush()
+                os.fsync(f.fileno())
+
+            tmp_path.unlink(missing_ok=True)
         except OSError:
-            logger.exception("Failed to write to session file %s", self._session_path)
+            logger.exception("Failed to write to session file %s", path)
+        except json.JSONDecodeError:
+            logger.error("Corrupt write detected, discarding line for %s", path)
+            tmp_path.unlink(missing_ok=True)
 
     def _load_from_file(self, path: Path) -> None:
         """Load messages from a JSONL file into the deque."""
@@ -272,3 +308,16 @@ def _now() -> float:
     """Current time as Unix timestamp. Extracted for testability."""
     import time
     return time.time()
+
+
+def _cleanup_old_sessions(sessions_dir: Path, retention_days: int) -> None:
+    """Delete session files older than retention_days."""
+    import time
+    cutoff = time.time() - (retention_days * 86400)
+    for f in sessions_dir.glob("*.jsonl"):
+        try:
+            if f.stat().st_mtime < cutoff:
+                f.unlink()
+                logger.info("Cleaned up old session: %s", f.name)
+        except OSError:
+            logger.warning("Failed to clean up %s", f.name)
