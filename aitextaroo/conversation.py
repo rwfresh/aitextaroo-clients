@@ -122,7 +122,7 @@ class Conversation:
             _cleanup_old_sessions(sessions_dir, retention_days)
 
         session_files = sorted(
-            sessions_dir.glob("*.jsonl"),
+            [f for f in sessions_dir.glob("*.jsonl") if f.exists()],
             key=lambda f: f.stat().st_mtime,
             reverse=True,
         )
