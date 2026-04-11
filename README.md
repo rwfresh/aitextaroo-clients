@@ -166,7 +166,7 @@ print(result["assigned_number"])
 
 ## CLI Reference
 
-```
+```text
 aitextaroo-bridge [OPTIONS]
 
 Options:
