@@ -15,6 +15,7 @@ This module is orchestration — it delegates to:
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from aitextaroo.agents import Agent
 from aitextaroo.client import TextarooClient
@@ -48,6 +49,8 @@ class Bridge:
         client: An authenticated TextarooClient.
         agent: An Agent implementation that processes messages.
         max_history: Max messages to keep in conversation context.
+        sessions_dir: Directory for persistent session files.
+            None = in-memory only (original behavior).
     """
 
     def __init__(
@@ -55,10 +58,23 @@ class Bridge:
         client: TextarooClient,
         agent: Agent,
         max_history: int = 20,
+        sessions_dir: Path | None = None,
     ) -> None:
         self._client = client
         self._agent = agent
-        self._conversation = Conversation(max_messages=max_history)
+
+        if sessions_dir is not None:
+            self._conversation = Conversation.load_latest(
+                sessions_dir, max_messages=max_history,
+            )
+            logger.info(
+                "Session %s loaded (%d messages)",
+                self._conversation.session_id,
+                self._conversation.count,
+            )
+        else:
+            self._conversation = Conversation(max_messages=max_history)
+
         self._commands = CommandRouter(
             agent_name=agent.name,
             conversation=self._conversation,

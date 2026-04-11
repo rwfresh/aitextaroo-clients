@@ -3,7 +3,7 @@
 Usage:
     aitextaroo-bridge --api-key YOUR_KEY
     aitextaroo-bridge --api-key YOUR_KEY --agent claude
-    AITEXTAROO_API_KEY=your_key aitextaroo-bridge
+    AITEXTAROO_API_KEY=YOUR_KEY aitextaroo-bridge
 """
 
 from __future__ import annotations
@@ -13,10 +13,13 @@ import asyncio
 import logging
 import os
 import sys
+from pathlib import Path
 
 from aitextaroo.agents import BUILTIN_AGENTS, create_agent, detect_agents
 from aitextaroo.bridge import Bridge
 from aitextaroo.client import TextarooClient
+
+DEFAULT_SESSIONS_DIR = Path.home() / ".aitextaroo" / "sessions"
 
 
 def main() -> None:
@@ -24,18 +27,31 @@ def main() -> None:
     args = _parse_args()
     _configure_logging(args.verbose)
 
-    api_key = args.api_key
-    if not api_key:
+    key = args.api_key or os.environ.get("AITEXTAROO_API_KEY", "")
+    if not key:
         _exit_error("API key required. Use --api-key or set AITEXTAROO_API_KEY.")
 
     agent_name = _resolve_agent(args.agent)
 
+    # Session persistence
+    sessions_dir: Path | None = None
+    if not args.no_persist:
+        sessions_dir = Path(args.sessions_dir).expanduser()
+
     # Wire dependencies
-    client = TextarooClient(api_key=api_key, base_url=args.base_url)
+    client = TextarooClient(api_key=key, base_url=args.base_url)
     agent = create_agent(agent_name)
-    bridge = Bridge(client=client, agent=agent)
+    bridge = Bridge(
+        client=client,
+        agent=agent,
+        sessions_dir=sessions_dir,
+    )
 
     print(f"Starting bridge with {agent.name}...")
+    if sessions_dir:
+        print(f"Sessions: {sessions_dir}")
+    else:
+        print("Sessions: in-memory only (--no-persist)")
     print("Listening for SMS messages. Ctrl+C to stop.")
 
     try:
@@ -52,7 +68,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--api-key",
-        default=os.environ.get("AITEXTAROO_API_KEY", ""),
+        default="",
         help="AI Text-a-roo API key (or set AITEXTAROO_API_KEY env var)",
     )
     parser.add_argument(
@@ -65,6 +81,16 @@ def _parse_args() -> argparse.Namespace:
         "--base-url",
         default=os.environ.get("AITEXTAROO_BASE_URL", "https://api.aitextaroo.com"),
         help="API base URL (default: https://api.aitextaroo.com)",
+    )
+    parser.add_argument(
+        "--sessions-dir",
+        default=str(DEFAULT_SESSIONS_DIR),
+        help=f"Session file directory (default: {DEFAULT_SESSIONS_DIR})",
+    )
+    parser.add_argument(
+        "--no-persist",
+        action="store_true",
+        help="Disable session persistence (in-memory only)",
     )
     parser.add_argument(
         "--verbose", "-v",
