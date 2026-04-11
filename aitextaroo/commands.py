@@ -40,7 +40,7 @@ class CommandRouter:
 
         self._commands: dict[str, tuple[str, Callable[[], str]]] = {
             "help": ("List commands", self._cmd_help),
-            "new": ("Start a new conversation (old one is saved)", self._cmd_new),
+            "new": ("Start a new conversation", self._cmd_new),
             "status": ("Show bridge status", self._cmd_status),
         }
 
