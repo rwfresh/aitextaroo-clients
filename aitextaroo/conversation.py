@@ -180,20 +180,21 @@ class Conversation:
         """Record a response from the AI agent."""
         self._add(Message(role="assistant", text=text, ts=_now()))
 
-    def new_session(self) -> str:
+    def new_session(self) -> str | None:
         """Start a new session. Old session file is preserved.
 
         Returns:
-            The new session ID.
+            The new session ID, or None if in-memory only.
         """
         self._messages.clear()
+
+        if self._sessions_dir is None:
+            return None
+
         new_id = _generate_session_id()
         self._session_id = new_id
-
-        if self._sessions_dir is not None:
-            self._session_path.touch()
-            logger.info("New session %s", new_id)
-
+        self._session_path.touch()
+        logger.info("New session %s", new_id)
         return new_id
 
     def clear(self) -> None:
@@ -280,20 +281,22 @@ class Conversation:
 
         # Only load the last max_messages lines to match deque capacity
         recent_lines = lines[-self._max_messages:] if lines else []
+        # Offset so logged line numbers match the original file
+        file_offset = len(lines) - len(recent_lines)
 
-        for line_num, line in enumerate(recent_lines, 1):
+        for idx, line in enumerate(recent_lines):
             line = line.strip()
             if not line:
                 continue
             try:
                 data = json.loads(line)
             except json.JSONDecodeError:
-                logger.warning("Skipping corrupt line %d in %s", line_num, path.name)
+                logger.warning("Skipping corrupt line %d in %s", file_offset + idx + 1, path.name)
                 continue
 
             msg = Message.from_dict(data)
             if msg is None:
-                logger.warning("Skipping invalid message at line %d in %s", line_num, path.name)
+                logger.warning("Skipping invalid message at line %d in %s", file_offset + idx + 1, path.name)
                 continue
 
             self._messages.append(msg)
