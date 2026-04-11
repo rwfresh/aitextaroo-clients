@@ -83,6 +83,13 @@ def _parse_json_response(response: httpx.Response, fallback_message: str) -> dic
             status_code=response.status_code,
         )
 
+    if not isinstance(data, dict):
+        raise TextarooError(
+            code="invalid_response",
+            message=f"{fallback_message}: expected JSON object (HTTP {response.status_code})",
+            status_code=response.status_code,
+        )
+
     return data
 
 

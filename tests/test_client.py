@@ -96,6 +96,18 @@ class TestParseJsonResponse:
         assert exc_info.value.code == "unauthorized"
         assert exc_info.value.status_code == 401
 
+    def test_200_with_json_array(self) -> None:
+        resp = self._make_response(200, "[]")
+        with pytest.raises(TextarooError) as exc_info:
+            _parse_json_response(resp, "Expected object")
+        assert exc_info.value.code == "invalid_response"
+
+    def test_200_with_json_null(self) -> None:
+        resp = self._make_response(200, "null")
+        with pytest.raises(TextarooError) as exc_info:
+            _parse_json_response(resp, "Expected object")
+        assert exc_info.value.code == "invalid_response"
+
 
 # ── TextarooClient API methods ──────────────────────────────────
 
