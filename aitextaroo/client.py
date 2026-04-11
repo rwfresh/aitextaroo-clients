@@ -13,9 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
@@ -47,6 +45,47 @@ class TextarooError(Exception):
         super().__init__(f"{code}: {message}")
 
 
+def _parse_json_response(response: httpx.Response, fallback_message: str) -> dict:
+    """Parse a JSON API response, raising TextarooError on failure.
+
+    Handles three failure modes that response.json() alone does not:
+    1. Empty response body (e.g., 502 from a gateway/proxy)
+    2. Non-JSON response body (e.g., HTML error page)
+    3. API error envelope ({"error": {"code": ..., "message": ...}})
+
+    Args:
+        response: The httpx Response object.
+        fallback_message: Human-readable message if the response has
+            no parseable error details.
+
+    Returns:
+        Parsed JSON dict on 200 OK.
+
+    Raises:
+        TextarooError: On any non-200 status or unparseable body.
+    """
+    # Try to parse JSON — but don't crash on empty/invalid body
+    try:
+        data = response.json()
+    except (json.JSONDecodeError, ValueError):
+        raise TextarooError(
+            code="http_error" if response.status_code != 200 else "invalid_response",
+            message=f"{fallback_message} (HTTP {response.status_code})",
+            status_code=response.status_code,
+        )
+
+    # Non-200 with valid JSON — extract the API error envelope
+    if response.status_code != 200:
+        error = data.get("error", {}) if isinstance(data, dict) else {}
+        raise TextarooError(
+            code=error.get("code", "unknown"),
+            message=error.get("message", fallback_message),
+            status_code=response.status_code,
+        )
+
+    return data
+
+
 class TextarooClient:
     """Client for the AI Text-a-roo SMS gateway.
 
@@ -56,7 +95,7 @@ class TextarooClient:
         timeout: HTTP timeout in seconds for non-streaming requests.
 
     Example:
-        >>> client = TextarooClient(api_key="your-key")
+        >>> client = TextarooClient(api_key="YOUR_KEY")
         >>> async for message in client.listen():
         ...     print(message.text)
         ...     await client.send("Got it!")
@@ -123,16 +162,7 @@ class TextarooClient:
                 "/v1/auth/verify",
                 json={"phone": phone},
             )
-            data = response.json()
-
-            if response.status_code != 200:
-                error = data.get("error", {})
-                raise TextarooError(
-                    code=error.get("code", "unknown"),
-                    message=error.get("message", "Verification request failed"),
-                    status_code=response.status_code,
-                )
-            return data
+            return _parse_json_response(response, "Verification request failed")
 
     @staticmethod
     async def confirm_verification(
@@ -162,16 +192,7 @@ class TextarooClient:
                 "/v1/auth/confirm",
                 json={"phone": phone, "code": code},
             )
-            data = response.json()
-
-            if response.status_code != 200:
-                error = data.get("error", {})
-                raise TextarooError(
-                    code=error.get("code", "unknown"),
-                    message=error.get("message", "Verification failed"),
-                    status_code=response.status_code,
-                )
-            return data
+            return _parse_json_response(response, "Verification failed")
 
     # ── Outbound messaging ──────────────────────────────────────
 
@@ -189,16 +210,7 @@ class TextarooClient:
         """
         client = await self._get_client()
         response = await client.post("/v1/send", json={"text": text})
-        data = response.json()
-
-        if response.status_code != 200:
-            error = data.get("error", {})
-            raise TextarooError(
-                code=error.get("code", "unknown"),
-                message=error.get("message", "Send failed"),
-                status_code=response.status_code,
-            )
-
+        data = _parse_json_response(response, "Send failed")
         return data.get("message_id", "")
 
     # ── Account info ────────────────────────────────────────────
@@ -214,16 +226,7 @@ class TextarooClient:
         """
         client = await self._get_client()
         response = await client.get("/v1/account")
-
-        if response.status_code != 200:
-            error = response.json().get("error", {})
-            raise TextarooError(
-                code=error.get("code", "unknown"),
-                message=error.get("message", "Account lookup failed"),
-                status_code=response.status_code,
-            )
-
-        return response.json()
+        return _parse_json_response(response, "Account lookup failed")
 
     # ── SSE stream ──────────────────────────────────────────────
 
