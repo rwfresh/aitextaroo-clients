@@ -36,7 +36,7 @@ def main() -> None:
     # Session persistence
     sessions_dir: Path | None = None
     if not args.no_persist:
-        sessions_dir = Path(args.sessions_dir)
+        sessions_dir = Path(args.sessions_dir).expanduser()
 
     # Wire dependencies
     client = TextarooClient(api_key=key, base_url=args.base_url)
