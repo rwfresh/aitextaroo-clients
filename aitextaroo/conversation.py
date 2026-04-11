@@ -89,10 +89,11 @@ class Conversation:
 
         if sessions_dir is not None:
             sessions_dir.mkdir(parents=True, exist_ok=True)
+            os.chmod(sessions_dir, 0o700)  # Owner-only access
             if session_id is None:
                 self._session_id = _generate_session_id()
-            # Touch the file so it exists even if no messages are added
-            self._session_path.touch()
+            # Create the file so it exists even if no messages are added
+            _touch_private(self._session_path)
 
     @classmethod
     def load_latest(
@@ -193,7 +194,7 @@ class Conversation:
 
         new_id = _generate_session_id()
         self._session_id = new_id
-        self._session_path.touch()
+        _touch_private(self._session_path)
         logger.info("New session %s", new_id)
         return new_id
 
@@ -300,6 +301,13 @@ class Conversation:
                 continue
 
             self._messages.append(msg)
+
+
+def _touch_private(path: Path) -> None:
+    """Create a file with owner-only permissions (0o600)."""
+    with open(path, "a"):
+        pass
+    os.chmod(path, 0o600)
 
 
 def _generate_session_id() -> str:
