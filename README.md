@@ -66,9 +66,19 @@ No polling. No webhooks. No public IP. Works behind NAT, firewalls, VPNs.
 
 ### Conversation history
 
-The bridge keeps conversation context in memory so your agent can have
-coherent multi-turn conversations over SMS. History is local — nothing
-is stored on our servers.
+The bridge keeps conversation context so your agent can have coherent
+multi-turn conversations over SMS. History is saved to local JSONL files
+(`~/.aitextaroo/sessions/`) and survives bridge restarts.
+
+- Bridge restart → picks up where you left off
+- `/new` → starts a fresh session (old one is saved on disk)
+- `--no-persist` → in-memory only, history gone when bridge stops
+- Nothing is stored on our servers — files live on your machine only
+
+### Third-party relay (Pro plan)
+
+Your agent can text anyone on your behalf. Replies get forwarded to your
+phone. Reply with `>` to respond through your agent's number.
 
 ### SMS formatting
 
@@ -79,11 +89,23 @@ italic, code blocks, and headers are stripped to plain text.
 
 Your user can text these commands:
 
-| Command   | What it does                           |
-|-----------|----------------------------------------|
-| `/help`   | List available commands                |
-| `/new`    | Start a fresh conversation             |
-| `/status` | Show agent name, uptime, message count |
+| Command   | What it does                                        |
+|-----------|-----------------------------------------------------|
+| `/help`   | List available commands                             |
+| `/new`    | Start a new conversation (old one is saved)         |
+| `/status` | Show agent name, uptime, session info, message count |
+
+## Plans
+
+| Feature              | Free ($0)  | Pro ($5/mo)              |
+|----------------------|------------|--------------------------|
+| Messages/day         | 10         | 200                      |
+| 2-way conversations  | ✓          | ✓                        |
+| Security PIN         | ✓          | ✓                        |
+| Relay to contacts    | —          | ✓                        |
+| Reply forwarding     | —          | ✓                        |
+
+14-day free trial on Pro. Cancel anytime.
 
 ## Python API
 
@@ -94,7 +116,7 @@ import asyncio
 from aitextaroo import TextarooClient
 
 async def main():
-    client = TextarooClient(api_key="your-key")
+    client = TextarooClient(api_key="YOUR_KEY")
 
     async for message in client.listen():
         print(f"Got: {message.text}")
@@ -139,14 +161,29 @@ print(result["assigned_number"])
 | `text`        | `str`  | Message body             |
 | `received_at` | `str`  | ISO 8601 timestamp       |
 | `channel`     | `str`  | Always `"sms"`           |
-| `has_pin`     | `bool` | Whether sender has a PIN |
+| `trust_level` | `str`  | `"low"`, `"medium"`, or `"high"` (PIN verified) |
+| `has_pin`     | `bool` | Whether sender has a PIN set |
+
+## CLI Reference
+
+```
+aitextaroo-bridge [OPTIONS]
+
+Options:
+  --api-key KEY          API key (or set AITEXTAROO_API_KEY)
+  --agent NAME           Agent: auto, claude, hermes, openclaw, nanoclaw
+  --sessions-dir PATH    Session file directory (default: ~/.aitextaroo/sessions/)
+  --no-persist           Disable session persistence (in-memory only)
+  --base-url URL         Custom API URL
+  -v, --verbose          Debug logging
+```
 
 ## Privacy
 
 - Messages pass through and disappear — nothing is stored on our servers
-- Conversation history lives in your bridge process memory only
-- When the bridge stops, history is gone
+- Conversation history is saved as local files on your machine only
 - Your phone number is hashed and encrypted at rest
+- Session files are plain JSONL — inspect or delete them anytime
 
 ## Environment Variables
 
