@@ -67,12 +67,12 @@ def _parse_json_response(response: httpx.Response, fallback_message: str) -> dic
     # Try to parse JSON — but don't crash on empty/invalid body
     try:
         data = response.json()
-    except (json.JSONDecodeError, ValueError):
+    except (json.JSONDecodeError, ValueError) as exc:
         raise TextarooError(
             code="http_error" if response.status_code != 200 else "invalid_response",
             message=f"{fallback_message} (HTTP {response.status_code})",
             status_code=response.status_code,
-        )
+        ) from exc
 
     # Non-200 with valid JSON — extract the API error envelope
     if response.status_code != 200:
