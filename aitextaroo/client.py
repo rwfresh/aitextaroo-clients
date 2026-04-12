@@ -76,7 +76,9 @@ def _parse_json_response(response: httpx.Response, fallback_message: str) -> dic
 
     # Non-200 with valid JSON — extract the API error envelope
     if response.status_code != 200:
-        error = data.get("error", {}) if isinstance(data, dict) else {}
+        error = data.get("error") if isinstance(data, dict) else None
+        if not isinstance(error, dict):
+            error = {}
         raise TextarooError(
             code=error.get("code", "unknown"),
             message=error.get("message", fallback_message),

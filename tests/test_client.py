@@ -108,6 +108,29 @@ class TestParseJsonResponse:
             _parse_json_response(resp, "Expected object")
         assert exc_info.value.code == "invalid_response"
 
+    def test_400_with_error_as_list(self) -> None:
+        """Malformed error envelope where 'error' is a list, not a dict."""
+        resp = self._make_response(400, '{"error": []}')
+        with pytest.raises(TextarooError) as exc_info:
+            _parse_json_response(resp, "Fallback")
+        assert exc_info.value.code == "unknown"
+        assert exc_info.value.message == "Fallback"
+        assert exc_info.value.status_code == 400
+
+    def test_400_with_error_as_string(self) -> None:
+        """Malformed error envelope where 'error' is a string."""
+        resp = self._make_response(400, '{"error": "oops"}')
+        with pytest.raises(TextarooError) as exc_info:
+            _parse_json_response(resp, "Fallback")
+        assert exc_info.value.code == "unknown"
+        assert exc_info.value.message == "Fallback"
+
+    def test_400_with_error_as_null(self) -> None:
+        resp = self._make_response(400, '{"error": null}')
+        with pytest.raises(TextarooError) as exc_info:
+            _parse_json_response(resp, "Fallback")
+        assert exc_info.value.code == "unknown"
+
 
 # ── TextarooClient API methods ──────────────────────────────────
 
