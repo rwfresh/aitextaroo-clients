@@ -25,8 +25,11 @@ Your agent will find the setup instructions and handle everything.
 ### Or use the CLI
 
 ```bash
-# 1. Install
-pip install aitextaroo
+# 1. Install (pipx recommended — handles modern Linux PEP 668)
+pipx install aitextaroo
+
+# Or with pip:
+pip install --user aitextaroo
 
 # 2. Verify your phone (sends a 6-digit code)
 aitextaroo-setup --phone +12125551234
