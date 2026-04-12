@@ -257,6 +257,40 @@ class TestSend:
         assert exc_info.value.status_code == 500
         await client.close()
 
+    @pytest.mark.asyncio
+    async def test_missing_message_id(self) -> None:
+        """200 OK with no message_id field — server contract violation."""
+        transport = _mock_transport(200, '{"status": "ok"}')
+        client = TextarooClient(api_key="test_key")
+        client._client = httpx.AsyncClient(transport=transport, base_url="https://test.com")
+        with pytest.raises(TextarooError) as exc_info:
+            await client.send("Hello!")
+        assert exc_info.value.code == "invalid_response"
+        assert "message_id" in exc_info.value.message
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_empty_message_id(self) -> None:
+        """200 OK with empty string message_id."""
+        transport = _mock_transport(200, '{"message_id": ""}')
+        client = TextarooClient(api_key="test_key")
+        client._client = httpx.AsyncClient(transport=transport, base_url="https://test.com")
+        with pytest.raises(TextarooError) as exc_info:
+            await client.send("Hello!")
+        assert exc_info.value.code == "invalid_response"
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_non_string_message_id(self) -> None:
+        """200 OK with numeric message_id instead of string."""
+        transport = _mock_transport(200, '{"message_id": 12345}')
+        client = TextarooClient(api_key="test_key")
+        client._client = httpx.AsyncClient(transport=transport, base_url="https://test.com")
+        with pytest.raises(TextarooError) as exc_info:
+            await client.send("Hello!")
+        assert exc_info.value.code == "invalid_response"
+        await client.close()
+
 
 class TestAccount:
     @pytest.mark.asyncio

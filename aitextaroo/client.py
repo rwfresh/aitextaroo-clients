@@ -220,7 +220,14 @@ class TextarooClient:
         client = await self._get_client()
         response = await client.post("/v1/send", json={"text": text})
         data = _parse_json_response(response, "Send failed")
-        return data.get("message_id", "")
+        message_id = data.get("message_id")
+        if not isinstance(message_id, str) or not message_id:
+            raise TextarooError(
+                code="invalid_response",
+                message="Missing or invalid message_id in send response",
+                status_code=response.status_code,
+            )
+        return message_id
 
     # ── Account info ────────────────────────────────────────────
 
