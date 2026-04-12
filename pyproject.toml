@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aitextaroo"
-version = "0.1.1"
+version = "0.1.2"
 description = "Client library for AI Text-a-roo — give any AI agent a phone number"
 readme = "README.md"
 license = {text = "MIT"}
