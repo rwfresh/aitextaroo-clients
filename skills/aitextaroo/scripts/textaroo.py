@@ -16,7 +16,7 @@ Text your user and read their replies through https://aitextaroo.com.
 
 Authenticated commands read the API key from AITEXTAROO_API_KEY (or --api-key).
 `verify-pin` and `set-pin` read the PIN from stdin unless it's given as an
-argument, which keeps it out of shell history and the process list.
+argument; at a terminal they ask for it without echoing.
 Output is JSON on stdout; errors go to stderr with a non-zero exit code.
 """
 

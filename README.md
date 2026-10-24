@@ -47,7 +47,8 @@ aitextaroo send "Hello from my agent!"
 Made for agents with a shell. Output is JSON; errors go to stderr with exit code 1.
 `aitextaroo verify-pin` exits 2 when the PIN is wrong, so `aitextaroo verify-pin <<< 4821 && …`
 only continues on a match. `verify-pin` and `set-pin` read the PIN from stdin when it isn't
-an argument, which keeps it out of shell history and the process list.
+an argument. At a terminal they ask for it without echoing, which keeps it out of your shell
+history (a command with the PIN written in it, like the `<<<` form, can still be saved there).
 
 ```bash
 aitextaroo send "Build finished: 318 tests passing."
@@ -55,8 +56,8 @@ aitextaroo ask "Deploy to production? Reply YES or NO" --timeout 120   # text, t
 aitextaroo wait --timeout 60                                            # wait for the next text
 aitextaroo recent                                                       # texts from the last 5 minutes
 aitextaroo relay --to +12125550100 --name Mom "Happy birthday!"        # Pro: text a contact
-aitextaroo verify-pin <<< 4821                                          # check a PIN the user texted
-aitextaroo set-pin <<< 4821                                             # set the user's PIN (4-8 digits)
+aitextaroo verify-pin                                                   # check a PIN (hidden prompt)
+aitextaroo set-pin                                                      # set the user's PIN (4-8 digits)
 aitextaroo account
 aitextaroo upgrade                                                      # Stripe link for Pro
 aitextaroo webhook set https://example.com/hook --auth-header "Bearer <token>"
