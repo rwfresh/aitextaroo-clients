@@ -199,6 +199,20 @@ class TestCommands:
         assert out == {"status": "pin_set"}
         client.set_pin.assert_awaited_once_with("482193")
 
+    def test_pin_prompt_is_hidden_at_a_terminal(self, capsys, monkeypatch) -> None:
+        tty = io.StringIO()
+        tty.isatty = lambda: True  # type: ignore[method-assign]
+        monkeypatch.setattr("sys.stdin", tty)
+        client = self._client()
+        client.verify_pin.return_value = {"verified": True, "attempts_remaining": None}
+        with (
+            patch.object(agent_cli, "TextarooClient", return_value=client),
+            patch.object(agent_cli.getpass, "getpass", return_value="4821") as prompt,
+        ):
+            _run_cli(["--api-key", "k", "verify-pin"], capsys)
+        prompt.assert_called_once()
+        client.verify_pin.assert_awaited_once_with("4821")
+
     def test_missing_pin_fails_before_calling_the_api(self, capsys, monkeypatch) -> None:
         monkeypatch.setattr("sys.stdin", io.StringIO(""))
         client = self._client()

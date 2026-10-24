@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import getpass
 import json
 import os
 import sys
@@ -242,8 +243,16 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def _read_pin(arg: str | None) -> str:
-    """The PIN from the argument, or from the first line of stdin when it's omitted or "-"."""
-    pin = arg if arg not in (None, "-") else sys.stdin.readline()
+    """The PIN from the argument, or from stdin when it's omitted or "-".
+
+    At a terminal it's a hidden prompt; otherwise the first line of stdin.
+    """
+    if arg not in (None, "-"):
+        pin = arg
+    elif sys.stdin.isatty():
+        pin = getpass.getpass("PIN: ")
+    else:
+        pin = sys.stdin.readline()
     pin = pin.strip()
     if not pin:
         _fail("No PIN given. Pass it on stdin (aitextaroo verify-pin <<< 4821) or as an argument.")

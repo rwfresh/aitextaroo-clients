@@ -23,6 +23,7 @@ Output is JSON on stdout; errors go to stderr with a non-zero exit code.
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import os
 import sys
@@ -118,7 +119,13 @@ def main() -> None:
             )
         key = args.api_key
         if args.command in ("verify-pin", "set-pin"):
-            pin = (args.pin if args.pin not in (None, "-") else sys.stdin.readline()).strip()
+            if args.pin not in (None, "-"):
+                pin = args.pin
+            elif sys.stdin.isatty():
+                pin = getpass.getpass("PIN: ")  # hidden prompt at a terminal
+            else:
+                pin = sys.stdin.readline()
+            pin = pin.strip()
             if not pin:
                 sys.exit("No PIN given: pass it on stdin (verify-pin <<< 4821) or as an argument.")
         if args.command == "send":
