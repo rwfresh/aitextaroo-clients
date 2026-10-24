@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import sys
+import urllib.error
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -108,6 +109,48 @@ class TestConnections:
     def test_anything_but_a_connection_id_never_reaches_the_api(self, run, connection_id) -> None:
         with pytest.raises(SystemExit, match="Not a connection id"):
             run("disconnect", connection_id)
+
+
+class TestErrors:
+    @staticmethod
+    def _fail(monkeypatch, status: int, body: bytes, reason: str = "Error") -> str:
+        """What the script exits with when the API answers status with body."""
+        error = urllib.error.HTTPError(
+            "https://test.com/v1/account/pin", status, reason, {}, io.BytesIO(body)
+        )
+        monkeypatch.setattr(textaroo.urllib.request, "urlopen", MagicMock(side_effect=error))
+        with pytest.raises(SystemExit) as exc_info:
+            textaroo.request(
+                "POST", "/account/pin", base_url="https://test.com", api_key="k",
+                body={"pin": "48a1"},
+            )
+        return str(exc_info.value.code)
+
+    def test_a_422_never_repeats_what_was_sent(self, monkeypatch) -> None:
+        # FastAPI's 422 echoes the input: here, a mistyped PIN.
+        body = json.dumps(
+            {"detail": [{"type": "value_error", "loc": ["body", "pin"],
+                         "msg": "Value error, PIN must be 4-8 digits.", "input": "48a1",
+                         "ctx": {"error": {}}}]}
+        ).encode()
+        message = self._fail(monkeypatch, 422, body, "Unprocessable Entity")
+        assert message == "HTTP 422: pin: Value error, PIN must be 4-8 digits."
+        assert "48a1" not in message
+
+    @pytest.mark.parametrize(
+        ("status", "body", "expected"),
+        [
+            (403, b'{"error": {"code": "pin_incorrect", "message": "Incorrect PIN."}}',
+             "HTTP 403: pin_incorrect: Incorrect PIN."),
+            (401, b'{"detail": {"error": {"code": "unauthorized", "message": "Invalid API key."}}}',
+             "HTTP 401: unauthorized: Invalid API key."),
+            (400, b'{"detail": "Already on Pro"}', "HTTP 400: Already on Pro"),
+            (502, b"<html>Bad Gateway</html>", "HTTP 502: Bad Gateway"),
+            (500, b"", "HTTP 500: Bad Gateway"),
+        ],
+    )
+    def test_only_the_code_and_message(self, monkeypatch, status, body, expected) -> None:
+        assert self._fail(monkeypatch, status, body, "Bad Gateway") == expected
 
 
 def test_request_sends_a_delete_with_its_json_body(monkeypatch) -> None:

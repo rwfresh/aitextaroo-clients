@@ -46,6 +46,8 @@ DEFAULT_BASE_URL = "https://api.aitextaroo.com"
 LABEL_CHARS = frozenset(string.ascii_letters + string.digits + " ._()'@#:+-")
 # Connection ids go into the URL path, so nothing like "../" gets there.
 CONNECTION_ID = re.compile(r"(?:key|app)_[A-Za-z0-9_-]{1,100}")
+# Where FastAPI says a field was sent: the first part of a 422's "loc".
+REQUEST_PARTS = ("body", "query", "path", "header", "cookie")
 
 
 def request(
@@ -70,10 +72,41 @@ def request(
             raw = resp.read()
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode(errors="replace")
-        sys.exit(f"HTTP {exc.code}: {detail}")
+        sys.exit(describe_error(exc.code, exc.reason, exc.read()))
     except urllib.error.URLError as exc:
         sys.exit(f"Network error: {exc.reason}")
+
+
+def describe_error(status: int, reason: str, raw: bytes) -> str:
+    """What an API error says, like "HTTP 403: pin_incorrect: Incorrect PIN.".
+
+    Only the code and message are kept (for a 422, the field and the
+    problem), never the rest of the body: a 422 also repeats what was sent,
+    such as a mistyped PIN.
+    """
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        data = None
+    if not isinstance(data, dict):
+        data = {}
+    error, detail = data.get("error"), data.get("detail")
+    if not isinstance(error, dict) and isinstance(detail, dict):
+        error = detail.get("error")  # authentication failures nest it in "detail"
+    if isinstance(error, dict) and error.get("code"):
+        message = error.get("message")
+        text = f"{error['code']}: {message}" if message else str(error["code"])
+    elif isinstance(detail, list) and detail and isinstance(detail[0], dict):
+        loc = detail[0].get("loc")
+        parts = [str(part) for part in loc] if isinstance(loc, list) else []
+        if parts and parts[0] in REQUEST_PARTS:
+            parts = parts[1:]
+        text = f"{'.'.join(parts) or 'request'}: {detail[0].get('msg') or 'not valid'}"
+    elif isinstance(detail, str) and detail:
+        text = detail
+    else:
+        text = reason or "request failed"
+    return f"HTTP {status}: {text}"
 
 
 def read_pin(arg: str | None, prompt: str) -> str:
