@@ -41,16 +41,20 @@ aitextaroo send "Hello from my agent!"
 
 `--save` stores the API key in `~/.aitextaroo/credentials.json` with owner-only permissions.
 `aitextaroo` and `aitextaroo-bridge` find it there, or in `AITEXTAROO_API_KEY`, or in `--api-key`.
-Verifying a phone that already has an account makes a new key: apps connected before are
-signed out and webhook forwarding is turned off.
+Each verification adds a key, named with `--label` (default "aitextaroo on <computer name>").
+If you already have an account, nothing else is signed out: your other keys, connected apps
+and forwarding keep working, and you get a text saying a key was added. An account holds up
+to 10 keys; adding an 11th removes the one unused the longest, never the one that forwards
+your texts (setup prints which, and you get a text about it).
 
 ## The `aitextaroo` command
 
 Made for agents with a shell. Output is JSON; errors go to stderr with exit code 1.
 `aitextaroo verify-pin` exits 2 when the PIN is wrong, so `aitextaroo verify-pin <<< 4821 && …`
-only continues on a match. `verify-pin` and `set-pin` read the PIN from stdin when it isn't
-an argument. At a terminal they ask for it without echoing, which keeps it out of your shell
-history (a command with the PIN written in it, like the `<<<` form, can still be saved there).
+only continues on a match. `verify-pin`, `set-pin` and `remove-pin` read the PIN from stdin
+when it isn't an argument, and so do `webhook set` and `disconnect` with a bare `--pin`. At a
+terminal they ask for it without echoing, which keeps it out of your shell history (a command
+with the PIN written in it, like the `<<<` form, can still be saved there).
 
 ```bash
 aitextaroo send "Build finished: 318 tests passing."
@@ -65,6 +69,8 @@ aitextaroo remove-pin                                                   # needs 
 aitextaroo account
 aitextaroo upgrade                                                      # Stripe link for Pro
 aitextaroo webhook set https://example.com/hook --auth-header "Bearer <token>"   # add --pin if a PIN is set
+aitextaroo connections                                                  # keys and app sign-ins; "current" is this key
+aitextaroo disconnect <connection id>                                   # remove one; add --pin if a PIN is set
 aitextaroo connect [claude-code|codex|gemini|cursor|muse-code|claude|chatgpt|grok]
 ```
 
@@ -99,6 +105,18 @@ Conversation history is saved locally in `~/.aitextaroo/sessions/` and survives 
 Text `/help`, `/new` (fresh conversation) or `/status`. Use `--no-persist` for memory-only
 history. Responses are stripped of markdown for SMS.
 
+An account has one stream at a time: starting a second bridge, even with another key, stops
+the first. A bridge also stops when its key is removed from the account. Either way it says
+why and exits with code 0 instead of reconnecting, so a service set to restart on failure
+leaves it stopped ([setup guide](skills/aitextaroo/references/setup.md), section C). So
+does a key the API rejects (wrong, or removed while the bridge was off). Set up a service
+before 0.3.0? Run the guide's snippet again: older service files restart the bridge even
+after a clean stop, so two bridges keep kicking each other off.
+
+The bridge and `listen()` in 0.3.0 need the API released with them, the first that ends
+streams with `server_restarting` when it restarts (api.aitextaroo.com runs it). An older API
+ends every stream with `evicted` when it shuts down, which 0.3.0 treats as a stop.
+
 ```text
 aitextaroo-bridge [OPTIONS]
   --api-key KEY          API key (default: AITEXTAROO_API_KEY or the saved credentials)
@@ -131,14 +149,16 @@ asyncio.run(main())
 | `send(text)` | Text the user. Returns the message ID. |
 | `wait_for_reply(timeout_seconds=60)` | Wait up to 120 s for the user's next text (or one that arrived since your last send). Returns an `InboundMessage` or `None`. |
 | `recent_messages(after_id=None)` | Texts from the last five minutes. |
-| `listen()` | Async iterator over inbound texts via SSE, with automatic reconnect and replay. |
-| `text_contact(to, text, recipient_name=None)` | Pro: text someone else; their replies go to the user's phone. |
+| `listen()` | Async iterator over inbound texts via SSE, with automatic reconnect and replay. Raises `TextarooError` when reconnecting can't help: `unauthorized`, `credential_revoked` (the key was removed) or `evicted` (another stream took over the account). |
+| `text_contact(to, text, recipient_name=None)` | Pro: text someone else; their replies go to the user's phone for an hour after the last text to them. |
 | `verify_pin(pin)` | Check a PIN the user texted: `{"verified": bool, "attempts_remaining": int \| None}`. |
 | `set_pin(pin, current_pin=None)` / `remove_pin(current_pin)` | Set the security PIN the user chose (4–8 digits), change it (needs `current_pin`), or remove it (needs the current PIN). The user is texted before any change. |
 | `set_webhook(url, auth_header=None, pin=None)` / `remove_webhook()` | Forward inbound texts to a URL (signed with `X-Signature`). `pin` is required if the user has one; the user is texted where their texts go and can reply `UNHOOK` to stop it. |
+| `list_connections()` | The account's keys and app sign-ins (`current` marks this key) and what set up forwarding. |
+| `remove_connection(connection_id, pin=None)` | Disconnect one key or app sign-in. `pin` is required if the user has one; forwarding it set up stops too, and the user is texted. |
 | `account()` | Plan, assigned number, usage and daily limit. |
 | `upgrade_link()` | Stripe checkout link for Pro. |
-| `TextarooClient.request_verification(phone)` / `confirm_verification(phone, code)` | Sign-up, no key needed. |
+| `TextarooClient.request_verification(phone)` / `confirm_verification(phone, code, *, label=None)` | Sign-up, no key needed. Confirming adds a key named `label` and returns `api_key`, `key_id`, a `note` and `retired` (any key removed to stay at 10); nothing else is signed out. |
 
 `InboundMessage` has `id`, `text`, `received_at`, `channel` (`"sms"`), `trust_level` and
 `has_pin`. See [`examples/`](examples/) for an echo bot, a listener and an ask-and-wait flow.
@@ -146,10 +166,10 @@ asyncio.run(main())
 ## MCP server
 
 `https://api.aitextaroo.com/mcp` (streamable HTTP). Tools: `send_text`, `wait_for_reply`,
-`get_recent_messages`, `text_contact`, `verify_pin`, `get_account`, `get_upgrade_link`,
-`set_webhook`, `remove_webhook`, and `get_help` (how it works and how it's secured, for
-answering the user's questions). Clients sign in with OAuth, or send
-`Authorization: Bearer <API key>`:
+`get_recent_messages`, `text_contact`, `verify_pin`, `set_pin`, `get_account`,
+`get_upgrade_link`, `set_webhook`, `remove_webhook`, `list_connections`, `remove_connection`,
+and `get_help` (how it works and how it's secured, for answering the user's questions).
+Clients sign in with OAuth, or send `Authorization: Bearer <API key>`:
 
 ```bash
 claude mcp add --transport http --scope user aitextaroo https://api.aitextaroo.com/mcp \
@@ -167,13 +187,28 @@ Run `aitextaroo connect` for every client's exact setup. Reference: <https://ait
 | Security PIN | ✓ | ✓ |
 | Text your contacts, with replies forwarded | | ✓ |
 
-Up to 5 texts per minute. Limits reset at midnight UTC.
+What counts toward the daily limit: texts your agent sends (to you or your contacts), your
+contacts' replies forwarded to you, and your `>` replies to them. Your own texts to your agent
+don't count, but once the limit is reached, texts pause both ways until it resets. A
+contact's replies are forwarded for an hour after your agent (or you, with `>`) last texted
+them, at most 20 an hour and 50 a day, and they stop being forwarded once 80% of the day's
+limit is used (you get one text saying so), so contacts can't use up the texts you need with
+your agent. Up to 5 texts per minute. Limits reset at midnight UTC.
 
 ## Privacy and security
 
 - Message content is never written to AI Text-a-roo's database. Texts are held in memory
   for at most five minutes so an agent can catch up after a dropped connection.
 - Phone numbers are encrypted at rest; PINs are stored as bcrypt hashes.
+- Security events such as PIN checks and changes are kept as just a time and a kind, only
+  to enforce their limits, and for two days at most. Records of removed or expired app
+  sign-ins are deleted after 30 days.
+- You get a text whenever a key is added or an app signs in. On the
+  [dashboard](https://aitextaroo.com/dashboard) you can see and remove connected apps and
+  keys, stop forwarding, set or remove your PIN (removing it there always works, even if
+  you forgot it), or sign out everything, which also signs out your other browsers. Agents
+  can list connections and remove one too (with your PIN if you set one), and you're texted
+  when one is removed.
 - The bridge's history and the saved credentials live only on your machine.
 - SMS isn't end-to-end encrypted, and sender IDs can be spoofed. The bridge tells every agent
   to ask for your PIN before anything sensitive, because some CLIs (for example `hermes -z`)
@@ -193,7 +228,7 @@ Details: <https://aitextaroo.com/security>.
 
 Bump the version in `pyproject.toml`, `aitextaroo/__init__.py`, `plugin.json`,
 `.claude-plugin/plugin.json` and `gemini-extension.json`, merge to `main`, then push a
-matching tag: `git tag v0.2.2 && git push origin v0.2.2`. The
+matching tag: `git tag v0.3.0 && git push origin v0.3.0`. The
 [Release workflow](.github/workflows/release.yml) tests, builds and publishes to PyPI with
 Trusted Publishing.
 

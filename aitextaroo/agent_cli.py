@@ -14,16 +14,18 @@ Usage:
     aitextaroo upgrade
     aitextaroo webhook set https://example.com/hook [--auth-header "Bearer ..."] [--pin]
     aitextaroo webhook remove
+    aitextaroo connections                 # keys and app sign-ins; "current" is this key
+    aitextaroo disconnect <connection id> [--pin]
     aitextaroo connect [claude-code|codex|gemini|cursor|muse-code|claude|chatgpt|grok]
 
 Results are JSON on stdout (except `connect`, which prints instructions);
 errors go to stderr with exit code 1. `verify-pin` prints its result and exits
 with code 2 when the PIN is wrong, so `aitextaroo verify-pin <<< 4821 && ...` only
-proceeds on a match. `verify-pin` and `set-pin` read the PIN from stdin when
-it isn't given as an argument; at a terminal they ask for it without echoing.
-`webhook set` needs the user's PIN if they set one: pass bare `--pin` to read
-it the same way. The API key comes from --api-key, AITEXTAROO_API_KEY, or
-~/.aitextaroo/credentials.json (aitextaroo-setup --save).
+proceeds on a match. `verify-pin`, `set-pin` and `remove-pin` read the PIN from
+stdin when it isn't given as an argument; at a terminal they ask for it without
+echoing. `webhook set` and `disconnect` need the user's PIN if they set one:
+pass bare `--pin` to read it the same way. The API key comes from --api-key,
+AITEXTAROO_API_KEY, or ~/.aitextaroo/credentials.json (aitextaroo-setup --save).
 """
 
 from __future__ import annotations
@@ -131,9 +133,12 @@ def main(argv: list[str] | None = None) -> None:
     # first line), then the new one.
     if args.command == "set-pin" and args.current is not None:
         args.current = _read_pin(args.current, "Current PIN: ")
-    # webhook set only needs the PIN when --pin was given (accounts with a PIN).
-    needs_pin = args.command in ("verify-pin", "set-pin", "remove-pin") or (
-        args.command == "webhook" and args.action == "set" and args.pin is not None
+    # webhook set and disconnect only need the PIN when --pin was given
+    # (accounts with a PIN).
+    needs_pin = (
+        args.command in ("verify-pin", "set-pin", "remove-pin")
+        or (args.command == "webhook" and args.action == "set" and args.pin is not None)
+        or (args.command == "disconnect" and args.pin is not None)
     )
     if needs_pin:
         args.pin = _read_pin(args.pin, "New PIN: " if args.command == "set-pin" else "PIN: ")
@@ -149,6 +154,13 @@ def main(argv: list[str] | None = None) -> None:
     sys.stdout.write("\n")
     if args.command == "verify-pin" and result.get("verified") is not True:
         sys.exit(PIN_REJECTED_EXIT)
+    if args.command == "disconnect" and result.get("was_current") is True:
+        sys.stdout.flush()  # the result first, then the note, even in one log
+        print(
+            "Note: that was the key this command uses, so it no longer works. "
+            "Run aitextaroo-setup --save to add a new one.",
+            file=sys.stderr,
+        )
 
 
 async def _run(args: argparse.Namespace, key: str) -> Any:
@@ -186,6 +198,10 @@ async def _run(args: argparse.Namespace, key: str) -> Any:
                     args.url, auth_header=args.auth_header, pin=args.pin
                 )
             return await client.remove_webhook()
+        if args.command == "connections":
+            return await client.list_connections()
+        if args.command == "disconnect":
+            return await client.remove_connection(args.connection_id, pin=args.pin)
         raise AssertionError(f"unhandled command {args.command}")
     finally:
         await client.close()
@@ -270,6 +286,20 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="The user's PIN, if they set one. Bare --pin reads it from stdin or a hidden prompt",
     )
     hook.add_parser("remove", help="Stop webhook delivery")
+
+    sub.add_parser("connections", help="Keys and app sign-ins on the account, and forwarding")
+
+    p = sub.add_parser("disconnect", help="Remove a key or app sign-in (the user is texted)")
+    p.add_argument(
+        "connection_id", help="The id from `aitextaroo connections` (key_... or app_...)"
+    )
+    p.add_argument(
+        "--pin",
+        nargs="?",
+        const="-",
+        default=None,
+        help="The user's PIN, if they set one. Bare --pin reads it from stdin or a hidden prompt",
+    )
 
     p = sub.add_parser("connect", help="Show how to add the MCP server to an agent")
     p.add_argument("client", nargs="?", choices=sorted(CONNECT), help="Which client (default: all)")

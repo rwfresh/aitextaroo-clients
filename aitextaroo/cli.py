@@ -5,6 +5,13 @@ Usage:
     aitextaroo-bridge --api-key YOUR_KEY --agent claude
     aitextaroo-bridge --agent-command "pnpm --silent --dir ~/nanoclaw run chat"
     AITEXTAROO_API_KEY=YOUR_KEY aitextaroo-bridge
+
+The bridge runs until stopped. It also stops, and exits cleanly (code 0), when
+restarting can't help: its key is removed from the account, the API rejects
+its key (wrong, or removed while the bridge was off), or another bridge or
+program starts listening for the account's texts. A service manager set to
+restart on failure then leaves it stopped, instead of fighting the other
+bridge or retrying a dead key every few seconds forever.
 """
 
 from __future__ import annotations
@@ -19,15 +26,23 @@ from pathlib import Path
 
 from aitextaroo.agents import BUILTIN_AGENTS, create_agent, custom_agent, detect_agents
 from aitextaroo.bridge import Bridge
-from aitextaroo.client import TextarooClient
+from aitextaroo.client import STREAM_STOPS, TextarooClient, TextarooError
 from aitextaroo.credentials import load_api_key
 
 DEFAULT_SESSIONS_DIR = Path.home() / ".aitextaroo" / "sessions"
 
+# Why the bridge stopped when the API rejects its key. A 401 is never a
+# passing outage (the API answers 5xx when it can't check a key), so it
+# stops for good like the stream stops in STREAM_STOPS.
+REJECTED_KEY = (
+    "this key isn't on your account (wrong, or removed). "
+    "Run aitextaroo-setup --save to add one, then start the bridge again."
+)
 
-def main() -> None:
+
+def main(argv: list[str] | None = None) -> None:
     """Parse arguments, wire dependencies, run the bridge."""
-    args = _parse_args()
+    args = _parse_args(argv)
     _configure_logging(args.verbose)
 
     key = load_api_key(args.api_key)
@@ -66,14 +81,24 @@ def main() -> None:
     else:
         print("Sessions: in-memory only (--no-persist)")
     print("Listening for SMS messages. Ctrl+C to stop.")
+    # Logs go to stderr; without this, a log file or journal shows this banner
+    # after them (stdout is buffered when it isn't a terminal).
+    sys.stdout.flush()
 
     try:
         asyncio.run(bridge.run())
     except KeyboardInterrupt:
         print("\nBridge stopped.")
+    except TextarooError as exc:
+        if exc.code == "unauthorized" or exc.code in STREAM_STOPS:
+            # Restarting can't help, so exit 0 (see the module docstring).
+            reason = REJECTED_KEY if exc.code == "unauthorized" else exc.message
+            print(f"Bridge stopped: {reason}", file=sys.stderr)
+            return
+        _exit_error(f"{exc.code}: {exc.message}")
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Build and parse CLI arguments."""
     parser = argparse.ArgumentParser(
         prog="aitextaroo-bridge",
@@ -118,7 +143,7 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable debug logging",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def _configure_logging(verbose: bool) -> None:

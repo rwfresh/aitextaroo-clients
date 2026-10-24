@@ -9,7 +9,7 @@ Usage:
 import asyncio
 import os
 
-from aitextaroo import TextarooClient
+from aitextaroo import TextarooClient, TextarooError
 
 
 async def main() -> None:
@@ -26,6 +26,10 @@ async def main() -> None:
             print(f"Received: {message.text}")
             await client.send(f"Echo: {message.text}")
             print(f"Replied: Echo: {message.text}")
+    except TextarooError as exc:
+        # listen() stops for good when the key is rejected or removed, or
+        # another stream takes over the account.
+        print(f"Stopped: {exc.message}")
     finally:
         await client.close()
 

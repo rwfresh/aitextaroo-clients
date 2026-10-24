@@ -255,6 +255,93 @@ class TestCommands:
         assert "No PIN given" in capsys.readouterr().err
         client.verify_pin.assert_not_called()
 
+    def test_connections(self, capsys) -> None:
+        listing = {
+            "keys": [{"id": "key_1", "current": True}],
+            "apps": [],
+            "forwarding": None,
+            "max_keys": 10,
+        }
+        client = self._client()
+        client.list_connections.return_value = listing
+        with patch.object(agent_cli, "TextarooClient", return_value=client):
+            out = _run_cli(["--api-key", "k", "connections"], capsys)
+        assert out == listing
+        client.close.assert_awaited_once()
+
+    def test_disconnect_without_a_pin_never_reads_stdin(self, capsys, monkeypatch) -> None:
+        stdin = io.StringIO("4821\n")
+        monkeypatch.setattr("sys.stdin", stdin)
+        client = self._client()
+        client.remove_connection.return_value = {"status": "removed", "was_current": False}
+        with patch.object(agent_cli, "TextarooClient", return_value=client):
+            out = _run_cli(["--api-key", "k", "disconnect", "app_grok1234"], capsys)
+        assert out["status"] == "removed"
+        client.remove_connection.assert_awaited_once_with("app_grok1234", pin=None)
+        assert stdin.read() == "4821\n"  # untouched
+
+    def test_disconnect_reads_the_pin_from_stdin(self, capsys, monkeypatch) -> None:
+        # `disconnect <id> --pin <<< 4821` keeps the PIN out of argv.
+        monkeypatch.setattr("sys.stdin", io.StringIO("4821\n"))
+        client = self._client()
+        client.remove_connection.return_value = {"status": "removed", "was_current": False}
+        with patch.object(agent_cli, "TextarooClient", return_value=client):
+            _run_cli(["--api-key", "k", "disconnect", "key_abc", "--pin"], capsys)
+        client.remove_connection.assert_awaited_once_with("key_abc", pin="4821")
+
+    def test_disconnect_pin_prompt_is_hidden_at_a_terminal(self, capsys, monkeypatch) -> None:
+        tty = io.StringIO()
+        tty.isatty = lambda: True  # type: ignore[method-assign]
+        monkeypatch.setattr("sys.stdin", tty)
+        client = self._client()
+        client.remove_connection.return_value = {"status": "removed", "was_current": False}
+        with (
+            patch.object(agent_cli, "TextarooClient", return_value=client),
+            patch.object(agent_cli.getpass, "getpass", return_value="4821") as prompt,
+        ):
+            _run_cli(["--api-key", "k", "disconnect", "key_abc", "--pin"], capsys)
+        prompt.assert_called_once_with("PIN: ")
+        client.remove_connection.assert_awaited_once_with("key_abc", pin="4821")
+
+    def test_disconnect_with_an_empty_pin_fails_before_calling_the_api(
+        self, capsys, monkeypatch
+    ) -> None:
+        monkeypatch.setattr("sys.stdin", io.StringIO("\n"))
+        client = self._client()
+        with (
+            patch.object(agent_cli, "TextarooClient", return_value=client),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            agent_cli.main(["--api-key", "k", "disconnect", "key_abc", "--pin"])
+        assert exc_info.value.code == 1
+        assert "No PIN given" in capsys.readouterr().err
+        client.remove_connection.assert_not_called()
+
+    def test_disconnecting_this_key_says_it_no_longer_works(self, capsys) -> None:
+        client = self._client()
+        client.remove_connection.return_value = {"status": "removed", "was_current": True}
+        with patch.object(agent_cli, "TextarooClient", return_value=client):
+            agent_cli.main(["--api-key", "k", "disconnect", "key_abc"])
+        captured = capsys.readouterr()
+        assert json.loads(captured.out)["was_current"] is True
+        assert "that was the key this command uses" in captured.err
+        assert "aitextaroo-setup --save" in captured.err
+
+    def test_disconnect_error_exits_nonzero(self, capsys) -> None:
+        from aitextaroo.client import TextarooError
+
+        client = self._client()
+        client.remove_connection.side_effect = TextarooError(
+            "pin_required", "This account has a security PIN.", 403
+        )
+        with (
+            patch.object(agent_cli, "TextarooClient", return_value=client),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            agent_cli.main(["--api-key", "k", "disconnect", "key_abc"])
+        assert exc_info.value.code == 1
+        assert "pin_required: This account has a security PIN." in capsys.readouterr().err
+
     @pytest.mark.parametrize(
         ("error", "expected"),
         [

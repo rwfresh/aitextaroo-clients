@@ -15,7 +15,8 @@ Pick the path that matches the environment.
 ## A. Apps with connector settings (Claude, Claude Duet, ChatGPT, Grok Bot)
 
 Add the remote MCP server as a custom connector and sign in with the user's
-phone (OAuth). No API key is needed.
+phone (OAuth). No API key is needed. The user gets a text saying the app
+connected.
 
 ```
 https://api.aitextaroo.com/mcp
@@ -49,10 +50,14 @@ https://api.aitextaroo.com/mcp
    `--save` stores the API key in `~/.aitextaroo/credentials.json` with owner-only
    permissions, where `aitextaroo` and `aitextaroo-bridge` find it in later
    sessions. Without `--save`, store the printed key yourself (for example as
-   `AITEXTAROO_API_KEY`); it can't be retrieved again. Confirming a code for a
-   phone that already has an account issues a new key: the old key stops working,
-   every app connected before (including OAuth connectors like Grok or Claude) is
-   signed out, and forwarding to a webhook is turned off. Tell the user first.
+   `AITEXTAROO_API_KEY`); it can't be retrieved again. Each confirmation adds a
+   key, named "aitextaroo on <computer name>" unless you pass `--label`. If the
+   phone already has an account, nothing else is signed out: its other keys,
+   connected apps (including OAuth connectors like Grok or Claude) and forwarding
+   keep working. An account holds up to 10 keys: adding an 11th removes the one
+   unused the longest (never the one that forwards the user's texts), and the
+   user is texted which. The user gets a text saying a key was added, so tell
+   them to expect it.
 
 4. Tell the user their AI's number (`assigned_number`) and suggest saving it as a
    contact such as "My AI". Then send a test text:
@@ -70,6 +75,7 @@ aitextaroo recent                                                       # texts 
 aitextaroo relay --to +12125550100 --name Mom "Happy birthday!"        # Pro
 aitextaroo verify-pin             # asks for the PIN without echoing; exits 2 if wrong
 aitextaroo account
+aitextaroo connections            # keys and app sign-ins on the account; "current" is you
 aitextaroo connect          # how to add the MCP server to Claude Code, Codex, Gemini CLI, Cursor…
 ```
 
@@ -96,7 +102,10 @@ nohup aitextaroo-bridge > ~/aitextaroo.log 2>&1 &
 - History is kept locally in `~/.aitextaroo/sessions/`.
 - SMS commands for the user: `/help`, `/new` (fresh conversation), `/status`.
 - Check it's running: `pgrep -f aitextaroo-bridge`. Logs: `tail -20 ~/aitextaroo.log`.
-- One stream per API key: a second bridge disconnects the first.
+- One stream per account: a second bridge, even with another key, stops the
+  first. A bridge also stops when its key is removed from the account, or when
+  the API rejects its key (wrong, or removed while the bridge was off). Either
+  way it says why and exits cleanly (code 0) instead of reconnecting.
 - The bridge runs the agent with its own permissions. Some CLIs (for example
   `hermes -z`) auto-approve tool calls in one-shot mode, and a text can't prove
   who sent it, so the bridge tells the agent to ask for the user's PIN before
@@ -123,7 +132,9 @@ Forwarding is protected: the PIN is required if the user has one, AI Text-a-roo
 texts the user the destination host before forwarding starts (if that text can't
 be sent, nothing changes), the user can text `UNHOOK` anytime to stop it, and
 webhook changes are limited to 5 an hour. `aitextaroo webhook remove` (or the
-`remove_webhook` tool) stops forwarding and texts the user.
+`remove_webhook` tool) stops forwarding and texts the user. The user can also
+stop it on the dashboard (https://aitextaroo.com/dashboard), and removing the key
+or app sign-in that set it up stops it too.
 
 ## Good texts
 
@@ -133,8 +144,22 @@ the PIN from stdin and exits 2 when it's wrong, or the `verify_pin` MCP tool).
 No PIN yet? Ask the user to pick 4–8 digits and run `aitextaroo set-pin` (or the
 `set_pin` MCP tool); never choose it for them. Changing or removing a PIN needs the
 current one (`set-pin --current`, `remove-pin`), and the user is texted before any
-change. The PIN is the only secret to ask for by text: never ask for passwords or
+change. If the user forgot it, they can remove it on the dashboard, which always
+works. The PIN is the only secret to ask for by text: never ask for passwords or
 card numbers.
+
+## Connected apps and keys
+
+The user gets a text whenever a key is added or an app signs in. To see what's
+connected, run `aitextaroo connections` (or call the `list_connections` MCP
+tool): each key and app sign-in has a label and when it was last used, and
+`current` is you. To disconnect one when the user asks ("disconnect my old
+laptop"), confirm which one with them first, then run
+`aitextaroo disconnect <id>`, adding `--pin` if they have a PIN (it reads the PIN
+from stdin or a hidden prompt), or call `remove_connection`. It stops working
+right away, forwarding it set up stops too, and the user is texted. "Sign out
+everything" is only on the dashboard, https://aitextaroo.com/dashboard, where the
+user can also stop forwarding and set or remove their PIN.
 
 ## When the user wants to text you anytime
 
@@ -150,4 +175,12 @@ texts yet. Use plain words with the user and finish with a live test text.
 
 - Free: 10 messages a day. Pro: $5/month (14-day free trial), 200 a day, plus
   texting the user's contacts with replies forwarded to the user.
+- What counts: texts you send (to the user or their contacts), contacts' replies
+  forwarded to the user, and the user's `>` replies to them. The user's own texts
+  to you don't count, but once the limit is reached texts pause both ways until
+  it resets.
+- A contact's replies are forwarded for an hour after you (or the user, with `>`)
+  last texted that contact, at most 20 an hour and 50 a day, and they stop being
+  forwarded once 80% of the day's limit is used (the user gets one text saying
+  so), so contacts can't use up the texts the user needs with you.
 - Up to 5 texts per minute. Limits reset at midnight UTC.

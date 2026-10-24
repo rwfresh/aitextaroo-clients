@@ -6,6 +6,7 @@ Provides:
 3. wait_for_reply()  — ask a question, then wait for the user's answer
 4. text_contact()    — text someone else on the user's behalf (Pro)
 5. PIN checks, recent messages, webhooks and the Pro upgrade link
+6. Connections: list the account's keys and app sign-ins, remove one
 
 The SSE client handles reconnection, Last-Event-ID replay,
 and keepalive parsing automatically. No public IP or webhook
@@ -14,8 +15,10 @@ configuration is needed — it's a single outbound HTTPS connection.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
+import re
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -42,6 +45,35 @@ MIN_WAIT_SECONDS = 1
 MAX_WAIT_SECONDS = 120
 # Extra HTTP time on top of the wait so the server answers before we give up.
 WAIT_HTTP_MARGIN = 15.0
+
+# The API sends a keepalive on the stream at least every 20 seconds, so one
+# that's silent this long is dead (the computer slept, or a router dropped
+# the connection without a word): give up on it and reconnect.
+STREAM_READ_TIMEOUT = 90.0
+
+# Stream error events after which reconnecting can't help, so listen() raises
+# a TextarooError with that code instead. Reconnecting after "evicted" would
+# just knock the other stream off in turn, back and forth. Only programs
+# reading /v1/stream cause "evicted": connected apps (Grok, Claude...) and
+# forwarding never do.
+CREDENTIAL_REVOKED = "credential_revoked"
+EVICTED = "evicted"
+STREAM_STOPS: dict[str, str] = {
+    CREDENTIAL_REVOKED: (
+        "This key was removed from your account. If you've saved a new one since, "
+        "just start the bridge again; otherwise run aitextaroo-setup --save to add one."
+    ),
+    EVICTED: (
+        "Another bridge or program started listening for this account's texts "
+        "(with any of its keys), and only one can listen at a time. Stop the other "
+        "one, then start this one again."
+    ),
+}
+
+# A connection id goes into the request path, so only these characters get
+# there: "../../webhook" would otherwise collapse into DELETE /v1/webhook.
+# The API itself answers "connection_not_found" for any id it doesn't know.
+_CONNECTION_ID = re.compile(r"(?:key|app)_[A-Za-z0-9_-]{1,100}")
 
 
 class TextarooError(Exception):
@@ -223,29 +255,45 @@ class TextarooClient:
         phone: str,
         code: str,
         base_url: str = DEFAULT_BASE_URL,
+        *,
+        label: str | None = None,
     ) -> dict[str, Any]:
         """Confirm verification code and receive API key (step 2 of signup).
 
         This is a static method — no API key needed. The returned dict
         contains the api_key needed to create a TextarooClient.
 
+        Each confirmation adds a key to the account. If the account already
+        exists, its other keys, app sign-ins and forwarding keep working, and
+        the owner is texted that a key was added. An account holds up to 10
+        keys: an 11th retires the one unused the longest, never the one that
+        forwards the owner's texts when another can go ("retired" lists it,
+        and the owner is texted which).
+
         Args:
             phone: Same phone number used in request_verification.
             code: The 6-digit code received via SMS.
-            base_url: API base URL.
+            base_url: API base URL (the third argument, as in 0.2.x).
+            label: Keyword only. A name for the key, shown on the dashboard
+                and in the owner's text: 1–40 letters, digits, spaces or
+                . _ ( ) ' @ # : + - (the API's default is "API key").
 
         Returns:
-            {"status": "verified", "api_key": "...", "assigned_number": "+1...",
-             "tier": "free", "note": "..."}
+            {"status": "verified", "api_key": "...", "key_id": "key_<uuid>",
+             "assigned_number": "+1...", "tier": "free", "note": "...",
+             "retired": [{"id": "key_<uuid>", "label": "...",
+             "forwarding_stopped": "<host>" | None}]}. The note says first
+            what changed; "retired" is usually empty.
 
         Raises:
-            TextarooError: If the code is invalid or expired.
+            TextarooError: If the code is invalid or expired, or the label isn't
+                allowed ("validation_error").
         """
+        body = {"phone": phone, "code": code}
+        if label:
+            body["label"] = label
         async with httpx.AsyncClient(base_url=base_url, timeout=30.0) as client:
-            response = await client.post(
-                "/v1/auth/confirm",
-                json={"phone": phone, "code": code},
-            )
+            response = await client.post("/v1/auth/confirm", json=body)
             return _parse_json_response(response, "Verification failed")
 
     # ── Outbound messaging ──────────────────────────────────────
@@ -268,7 +316,9 @@ class TextarooClient:
         """Text someone else on the user's behalf (Pro plan).
 
         The contact sees the AI's number. Their replies are forwarded to
-        the user's phone, labeled with recipient_name when given.
+        the user's phone, labeled with recipient_name when given, for an
+        hour after the last text to them (from you, or the user's ">" reply).
+        They count toward the daily limit, and stop once 80% of it is used.
 
         Args:
             to: The contact's number in E.164 format (e.g., "+12125550100").
@@ -446,6 +496,63 @@ class TextarooClient:
         response = await client.delete("/v1/webhook")
         return _parse_json_response(response, "Webhook removal failed")
 
+    # ── Connections (keys and app sign-ins) ─────────────────────
+
+    async def list_connections(self) -> dict[str, Any]:
+        """The account's API keys and app sign-ins, and what set up forwarding.
+
+        Returns:
+            {"keys": [{"id": "key_<uuid>", "kind": "key", "label", "hint",
+            "created_at", "last_used_at", "current", "forwarding"}, ...],
+            "apps": [{"id": "app_<id>", "kind": "app", "label", "verified",
+            "created_at", "last_used_at", "current", "forwarding"}, ...],
+            "forwarding": {"host", "set_by", "set_at"} | None, "max_keys": 10}.
+            Each list is most recently used first; "current" marks the key
+            this client uses.
+
+        Raises:
+            TextarooError: If the API returns an error.
+        """
+        client = await self._get_client()
+        response = await client.get("/v1/account/connections")
+        return _parse_json_response(response, "Listing connections failed")
+
+    async def remove_connection(self, connection_id: str, pin: str | None = None) -> dict[str, Any]:
+        """Disconnect one API key or app sign-in, when the user asks for it.
+
+        It stops working right away, and forwarding it set up stops too. The
+        user is texted about it ("owner_notified" says whether that text went
+        out). Removing the key this client uses ("was_current") cuts this
+        client off. Signing out everything at once is only on the dashboard.
+
+        Args:
+            connection_id: An id from list_connections(): "key_..." or "app_...".
+            pin: The user's security PIN. Required if they have one.
+
+        Returns:
+            {"status": "removed", "removed": {"id", "kind", "label"},
+            "forwarding_stopped": host | None, "owner_notified": bool,
+            "was_current": bool}
+
+        Raises:
+            TextarooError: "connection_not_found" (also for an id that isn't one,
+                without calling the API), "pin_required" or "pin_incorrect",
+                "pin_locked" or "rate_limit_exceeded", "temporarily_unavailable"
+                (nothing changed), or another API error.
+        """
+        if not isinstance(connection_id, str) or not _CONNECTION_ID.fullmatch(connection_id):
+            raise TextarooError(
+                code="connection_not_found",
+                message="Not a connection id (they start with key_ or app_). List them to find it.",
+            )
+        client = await self._get_client()
+        response = await client.request(
+            "DELETE",
+            f"/v1/account/connections/{connection_id}",
+            json={"pin": pin} if pin else None,
+        )
+        return _parse_json_response(response, "Removing the connection failed")
+
     # ── Billing ─────────────────────────────────────────────────
 
     async def upgrade_link(self) -> str:
@@ -487,7 +594,11 @@ class TextarooClient:
         """Listen for inbound SMS messages via the SSE stream.
 
         Yields InboundMessage objects as they arrive. Handles
-        reconnection and Last-Event-ID replay automatically.
+        reconnection and Last-Event-ID replay automatically, including
+        after a stream that goes silent for STREAM_READ_TIMEOUT seconds.
+
+        An account has one stream at a time: opening another one (from any
+        of its keys) ends this one with "evicted".
 
         Args:
             auto_reconnect: If True (default), reconnects on disconnect
@@ -495,6 +606,12 @@ class TextarooClient:
 
         Yields:
             InboundMessage for each received SMS.
+
+        Raises:
+            TextarooError: When reconnecting can't help, so the stream stops for
+                good: "unauthorized" (401: the key is wrong or was removed),
+                "credential_revoked" (the key was removed from the account while
+                connected) or "evicted" (another stream took over the account).
 
         Example:
             >>> async for msg in client.listen():
@@ -505,20 +622,29 @@ class TextarooClient:
 
         while True:
             try:
-                async for event in self._stream_events():
-                    if event.type == EventType.CONNECTED:
-                        logger.info("Stream connected: %s", event.connected)
-                        delay = DEFAULT_RECONNECT_DELAY  # Reset backoff
+                # aclosing: when this stops (or the caller stops iterating),
+                # the HTTP stream closes now, not whenever it's collected.
+                async with contextlib.aclosing(self._stream_events()) as events:
+                    async for event in events:
+                        if event.type == EventType.CONNECTED:
+                            logger.info("Stream connected: %s", event.connected)
+                            delay = DEFAULT_RECONNECT_DELAY  # Reset backoff
 
-                    elif event.type == EventType.MESSAGE and event.message:
-                        yield event.message
+                        elif event.type == EventType.MESSAGE and event.message:
+                            yield event.message
 
-                    elif event.type == EventType.ERROR and event.error:
-                        logger.warning("Stream error: %s", event.error)
-                        if event.error.retry_after:
-                            delay = float(event.error.retry_after)
+                        elif event.type == EventType.ERROR and event.error:
+                            stop = STREAM_STOPS.get(event.error.code)
+                            if stop:
+                                logger.warning("Stream stopped: %s", event.error.code)
+                                raise TextarooError(code=event.error.code, message=stop)
+                            logger.warning("Stream error: %s", event.error)
+                            if event.error.retry_after:
+                                delay = float(event.error.retry_after)
 
-            except (httpx.RemoteProtocolError, httpx.ReadError, httpx.ConnectError) as exc:
+            # Every network failure, read timeouts included (ReadTimeout
+            # isn't a ReadError): the connection is gone, so reconnect.
+            except httpx.TransportError as exc:
                 logger.warning("Stream disconnected: %s", type(exc).__name__)
 
             except httpx.HTTPStatusError as exc:
@@ -526,7 +652,7 @@ class TextarooClient:
                 if exc.response.status_code == 401:
                     raise TextarooError(
                         code="unauthorized",
-                        message="Invalid API key",
+                        message="Invalid API key (wrong, or removed from the account)",
                         status_code=401,
                     ) from exc
 
@@ -555,7 +681,8 @@ class TextarooClient:
             "GET",
             "/v1/stream",
             headers=headers,
-            timeout=None,  # Long-lived connection
+            # Long-lived, but never waiting forever on a dead connection.
+            timeout=httpx.Timeout(30.0, read=STREAM_READ_TIMEOUT),
         ) as response:
             response.raise_for_status()
 

@@ -1,4 +1,4 @@
-"""Tests for the reply, relay, PIN, webhook and billing client methods."""
+"""Tests for the reply, relay, PIN, webhook, connection and billing client methods."""
 
 import json
 
@@ -192,6 +192,107 @@ class TestWebhook:
         client, seen = _recording_client(200, '{"status": "removed"}')
         assert (await client.remove_webhook())["status"] == "removed"
         assert seen[0].method == "DELETE"
+        await client.close()
+
+
+KEY_ID = "key_0f8c2b9e-3a41-4d6b-9c1e-7a5d2f4b8e10"
+CONNECTIONS = {
+    "keys": [
+        {"id": KEY_ID, "kind": "key", "label": "aitextaroo on studio-mac", "hint": "...3f9a",
+         "created_at": "2026-10-24T12:00:00Z", "last_used_at": None, "current": True,
+         "forwarding": False},
+    ],
+    "apps": [
+        {"id": "app_Fam1ly_1d-xyz", "kind": "app", "label": "Grok", "verified": True,
+         "created_at": "2026-10-20T09:00:00Z", "last_used_at": "2026-10-24T11:00:00Z",
+         "current": False, "forwarding": True},
+    ],
+    "forwarding": {"host": "api.x.ai", "set_by": "app_Fam1ly_1d-xyz",
+                   "set_at": "2026-10-20T09:05:00Z"},
+    "max_keys": 10,
+}
+REMOVED = {
+    "status": "removed",
+    "removed": {"id": "app_Fam1ly_1d-xyz", "kind": "app", "label": "Grok"},
+    "forwarding_stopped": "api.x.ai",
+    "owner_notified": True,
+    "was_current": False,
+}
+
+
+class TestConnections:
+    @pytest.mark.asyncio
+    async def test_list(self) -> None:
+        client, seen = _recording_client(200, json.dumps(CONNECTIONS))
+        assert await client.list_connections() == CONNECTIONS
+        assert (seen[0].method, seen[0].url.path) == ("GET", "/v1/account/connections")
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_remove_without_a_pin_sends_no_body(self) -> None:
+        client, seen = _recording_client(200, json.dumps(REMOVED))
+        assert await client.remove_connection("app_Fam1ly_1d-xyz") == REMOVED
+        assert seen[0].method == "DELETE"
+        assert seen[0].url.path == "/v1/account/connections/app_Fam1ly_1d-xyz"
+        assert seen[0].content == b""
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_remove_with_a_pin(self) -> None:
+        client, seen = _recording_client(200, json.dumps({**REMOVED, "was_current": True}))
+        result = await client.remove_connection(KEY_ID, pin="4821")
+        assert result["was_current"] is True
+        assert seen[0].url.path == f"/v1/account/connections/{KEY_ID}"
+        assert json.loads(seen[0].content) == {"pin": "4821"}
+        await client.close()
+
+    @pytest.mark.parametrize(
+        ("status", "code"),
+        [
+            (403, "pin_required"),
+            (403, "pin_incorrect"),
+            (404, "connection_not_found"),
+            (429, "rate_limit_exceeded"),
+            (429, "pin_locked"),
+            (503, "temporarily_unavailable"),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_remove_errors(self, status: int, code: str) -> None:
+        client, _ = _recording_client(
+            status, json.dumps({"error": {"code": code, "message": "Nope"}})
+        )
+        with pytest.raises(TextarooError) as exc_info:
+            await client.remove_connection(KEY_ID, pin="0000")
+        assert (exc_info.value.code, exc_info.value.status_code) == (code, status)
+        assert exc_info.value.message == "Nope"
+        await client.close()
+
+    @pytest.mark.parametrize(
+        "connection_id",
+        [
+            "../../webhook",  # would collapse into DELETE /v1/webhook
+            "..",
+            "key_../../account/pin",
+            "app_%2e%2e",
+            "key_abc/def",
+            "key_abc?x=1",
+            "key_abc\n",
+            "KEY_abc",
+            "webhook",
+            "key_",
+            "",
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_anything_but_a_connection_id_never_reaches_the_api(
+        self, connection_id: str
+    ) -> None:
+        client, seen = _recording_client(200, json.dumps(REMOVED))
+        with pytest.raises(TextarooError) as exc_info:
+            await client.remove_connection(connection_id)
+        assert exc_info.value.code == "connection_not_found"
+        assert seen == []
         await client.close()
 
 
