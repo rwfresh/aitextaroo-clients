@@ -398,25 +398,34 @@ class TextarooClient:
 
     # ── Webhooks ────────────────────────────────────────────────
 
-    async def set_webhook(self, url: str, auth_header: str | None = None) -> dict[str, Any]:
+    async def set_webhook(
+        self, url: str, auth_header: str | None = None, pin: str | None = None
+    ) -> dict[str, Any]:
         """Forward each text the user sends to a URL as a signed JSON POST.
+
+        The user is texted the destination host before forwarding starts, and
+        can text UNHOOK to stop it.
 
         Args:
             url: Public https URL that receives the deliveries.
             auth_header: Optional Authorization header value sent with each
                 delivery (e.g., "Bearer <token>" for a Grok Bot webhook routine).
+            pin: The user's security PIN. Required if they have one.
 
         Returns:
-            {"status": "registered", "url": ..., "secret": ..., "has_auth_header": bool}.
-            Verify deliveries with the secret: X-Signature is a hex
-            HMAC-SHA256 of the raw body.
+            {"status": "registered", "url": ..., "secret": ..., "has_auth_header": bool,
+            "owner_notified": bool}. Verify deliveries with the secret:
+            X-Signature is a hex HMAC-SHA256 of the raw body.
 
         Raises:
-            TextarooError: If the API returns an error.
+            TextarooError: "pin_required" or "pin_incorrect", "owner_notice_failed"
+                (nothing changed), "rate_limit_exceeded", or another API error.
         """
         body: dict[str, Any] = {"url": url}
         if auth_header:
             body["auth_header"] = auth_header
+        if pin:
+            body["pin"] = pin
         client = await self._get_client()
         response = await client.post("/v1/webhook", json=body)
         return _parse_json_response(response, "Webhook registration failed")

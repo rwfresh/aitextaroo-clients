@@ -4,7 +4,7 @@ description: Text the user by SMS and read their replies through AI Text-a-roo (
 license: MIT
 metadata:
   homepage: https://aitextaroo.com
-  version: "1.0.0"
+  version: "1.1.0"
 ---
 
 # AI Text-a-roo
@@ -33,8 +33,11 @@ If the user isn't set up yet, follow [references/setup.md](references/setup.md).
 | Text a contact for the user (Pro) | `text_contact` | `relay --to +1… --name Mom "…"` |
 | Check a PIN the user texted | `verify_pin` | `verify-pin <<< 4821` |
 | Set the user's PIN | | `set-pin <<< 4821` |
-| Plan, usage and number | `get_account` | `account` |
+| Plan, usage, number and forwarding | `get_account` | `account` |
 | Pro upgrade link | `get_upgrade_link` | `upgrade` |
+| Forward the user's texts to a webhook | `set_webhook` | `webhook set <url>` (aitextaroo only) |
+| Stop forwarding | `remove_webhook` | `webhook remove` (aitextaroo only) |
+| Explain how it works and how it's secured | `get_help` | |
 
 ## Writing good texts
 
@@ -49,6 +52,15 @@ If the user isn't set up yet, follow [references/setup.md](references/setup.md).
 
 To get a decision, send the question with `send_text`, then call `wait_for_reply` (60–120 seconds per call). Call it again if it times out and the decision can still wait; after a few tries, continue without the answer or say in your own interface that you're waiting. A pending `wait_for_reply` receives the user's next text before anything else does.
 
+## Getting texts when you're not waiting
+
+The user's texts reach you only while `wait_for_reply` is waiting, or through a webhook. Otherwise they're kept in memory for five minutes (`get_recent_messages`) and then dropped. If you only run while the user is chatting with you, as most cloud assistants do, and they want to text you anytime:
+
+- **Agents with webhook-triggered runs**, such as a Grok Bot webhook routine: create the routine, then call `set_webhook` with its URL and `auth_header` (for example `Bearer <routine key>`). Each text then starts a run. See [references/setup.md](references/setup.md), section D.
+- **CLI agents on a computer:** run the bridge ([references/setup.md](references/setup.md), section C).
+
+Only set up forwarding when the user asks for it. It's protected, so tell the user what to expect: if they have a PIN, `set_webhook` needs it (ask them to text it); AI Text-a-roo texts them the destination host before forwarding starts; and they can text `UNHOOK` to their AI Text-a-roo number anytime to stop it. That keyword goes to AI Text-a-roo, never to you.
+
 ## Security PIN
 
 SMS sender IDs can be spoofed. Before anything sensitive (spending money, sending messages to other people, deleting things, changing settings), ask the user to text their PIN, call `verify_pin`, and continue only if it returns `verified: true`. The `verify_pin` MCP tool keeps the PIN out of the shell entirely. On the command line, `aitextaroo verify-pin` and `scripts/textaroo.py verify-pin` read the PIN from stdin when the PIN argument is omitted or `-` (`aitextaroo verify-pin <<< 4821 && …`) and exit 2 when it's wrong, so the `&&` only continues on a match. A command with the PIN in it can still be saved to shell history; in an interactive shell, run plain `aitextaroo verify-pin` and type the PIN at its hidden prompt instead. Don't store or repeat the PIN. Three wrong attempts lock verification for five minutes. If `get_account` shows `has_pin: false`, offer to set one: ask the user to choose 4–8 digits, then run `set-pin` (PIN on stdin) or call `POST /v1/account/pin` (see [references/api.md](references/api.md)). Don't keep a copy.
@@ -56,6 +68,10 @@ SMS sender IDs can be spoofed. Before anything sensitive (spending money, sendin
 ## Texting other people (Pro)
 
 Only text a contact when the user explicitly asks, and say who the message is from. Use E.164 numbers (+12125551234) and pass `recipient_name` so replies are labeled. Replies are forwarded to the user's phone automatically; the user can answer a contact directly by starting a text with `>`. Relays are one-to-one: never use them for bulk or marketing messages.
+
+## Questions about how it works
+
+If the user asks how AI Text-a-roo works, what it stores, or how it's secured, call `get_help` (topics: overview, receiving, webhooks, security, privacy, limits, setup) and answer from it instead of guessing. Without MCP, the same answers are at https://aitextaroo.com/security and https://aitextaroo.com/llms.txt.
 
 ## Limits
 

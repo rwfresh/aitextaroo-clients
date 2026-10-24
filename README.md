@@ -60,7 +60,7 @@ aitextaroo verify-pin                                                   # check 
 aitextaroo set-pin                                                      # set the user's PIN (4-8 digits)
 aitextaroo account
 aitextaroo upgrade                                                      # Stripe link for Pro
-aitextaroo webhook set https://example.com/hook --auth-header "Bearer <token>"
+aitextaroo webhook set https://example.com/hook --auth-header "Bearer <token>" --pin   # --pin if a PIN is set
 aitextaroo connect [claude-code|codex|gemini|cursor|muse-code|claude|chatgpt|grok]
 ```
 
@@ -131,7 +131,7 @@ asyncio.run(main())
 | `text_contact(to, text, recipient_name=None)` | Pro: text someone else; their replies go to the user's phone. |
 | `verify_pin(pin)` | Check a PIN the user texted: `{"verified": bool, "attempts_remaining": int \| None}`. |
 | `set_pin(pin)` / `remove_pin()` | Set, change or remove the user's security PIN (4–8 digits). |
-| `set_webhook(url, auth_header=None)` / `remove_webhook()` | Forward inbound texts to a URL (signed with `X-Signature`). |
+| `set_webhook(url, auth_header=None, pin=None)` / `remove_webhook()` | Forward inbound texts to a URL (signed with `X-Signature`). `pin` is required if the user has one; the user is texted where their texts go and can reply `UNHOOK` to stop it. |
 | `account()` | Plan, assigned number, usage and daily limit. |
 | `upgrade_link()` | Stripe checkout link for Pro. |
 | `TextarooClient.request_verification(phone)` / `confirm_verification(phone, code)` | Sign-up, no key needed. |
@@ -142,8 +142,10 @@ asyncio.run(main())
 ## MCP server
 
 `https://api.aitextaroo.com/mcp` (streamable HTTP). Tools: `send_text`, `wait_for_reply`,
-`get_recent_messages`, `text_contact`, `verify_pin`, `get_account`, `get_upgrade_link`.
-Clients sign in with OAuth, or send `Authorization: Bearer <API key>`:
+`get_recent_messages`, `text_contact`, `verify_pin`, `get_account`, `get_upgrade_link`,
+`set_webhook`, `remove_webhook`, and `get_help` (how it works and how it's secured, for
+answering the user's questions). Clients sign in with OAuth, or send
+`Authorization: Bearer <API key>`:
 
 ```bash
 claude mcp add --transport http --scope user aitextaroo https://api.aitextaroo.com/mcp \

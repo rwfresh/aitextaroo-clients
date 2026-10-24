@@ -163,6 +163,23 @@ class TestWebhook:
         await client.close()
 
     @pytest.mark.asyncio
+    async def test_set_with_pin(self) -> None:
+        client, seen = _recording_client(200, '{"status": "registered", "owner_notified": true}')
+        await client.set_webhook("https://hook.example", pin="4821")
+        assert json.loads(seen[0].content) == {"url": "https://hook.example", "pin": "4821"}
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_pin_required_is_an_error(self) -> None:
+        client, _ = _recording_client(
+            403, '{"error": {"code": "pin_required", "message": "This account has a security PIN"}}'
+        )
+        with pytest.raises(TextarooError) as exc_info:
+            await client.set_webhook("https://hook.example")
+        assert exc_info.value.code == "pin_required"
+        await client.close()
+
+    @pytest.mark.asyncio
     async def test_remove(self) -> None:
         client, seen = _recording_client(200, '{"status": "removed"}')
         assert (await client.remove_webhook())["status"] == "removed"

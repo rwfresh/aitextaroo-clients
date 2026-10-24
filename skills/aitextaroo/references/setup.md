@@ -58,12 +58,21 @@ nohup aitextaroo-bridge > ~/aitextaroo.log 2>&1 &
 
 ## D. Agents with an inbound webhook URL
 
-To receive every text the user sends as an HTTP POST (for example, to wake a Grok Bot webhook routine), register a webhook:
+To receive every text the user sends as an HTTP POST (for example, to wake a Grok Bot webhook routine), register a webhook. With the MCP server, call `set_webhook` with `url`, `auth_header` and, if the user has a PIN, `pin`. Over HTTP:
 
 ```
 POST https://api.aitextaroo.com/v1/webhook
 Authorization: Bearer <API key>
-{"url": "https://example.com/hook", "auth_header": "Bearer <token the receiver expects>"}
+{"url": "https://example.com/hook", "auth_header": "Bearer <token the receiver expects>", "pin": "4821"}
 ```
 
-The response includes a signing secret. Each delivery is a JSON body like `{"event": "message.inbound", "data": {"text": "…", "channel": "sms", "trust_level": "low", "has_pin": true}, "timestamp": 1761264000.0}` with an `X-Signature` header (hex HMAC-SHA256 of the body, keyed with the secret) and, if you set `auth_header`, an `Authorization` header with that value. Remove it with `DELETE /v1/webhook`.
+Leave out `pin` if the user hasn't set one (`get_account` shows `has_pin`). The response includes a signing secret. Each delivery is a JSON body like `{"event": "message.inbound", "data": {"text": "…", "channel": "sms", "trust_level": "low", "has_pin": true}, "timestamp": 1761264000.0}` with an `X-Signature` header (hex HMAC-SHA256 of the body, keyed with the secret) and, if you set `auth_header`, an `Authorization` header with that value.
+
+Forwarding is protected:
+
+- Registering needs the user's PIN if they have one. Wrong PINs count toward the usual lockout (3 tries per 5 minutes).
+- Before forwarding starts, AI Text-a-roo texts the user the destination host (never the full URL). If that text can't be sent, nothing changes.
+- The user can text `UNHOOK` to their AI Text-a-roo number anytime to stop forwarding. It's handled by AI Text-a-roo and never reaches an agent.
+- Only public HTTPS URLs are accepted, and at most 5 webhook changes an hour.
+
+Remove it with `DELETE /v1/webhook` or `remove_webhook`; the user is texted that forwarding is off.

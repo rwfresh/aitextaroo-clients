@@ -10,7 +10,7 @@ Usage:
     aitextaroo set-pin <<< 4821
     aitextaroo account
     aitextaroo upgrade
-    aitextaroo webhook set https://example.com/hook [--auth-header "Bearer ..."]
+    aitextaroo webhook set https://example.com/hook [--auth-header "Bearer ..."] [--pin]
     aitextaroo webhook remove
     aitextaroo connect [claude-code|codex|gemini|cursor|muse-code|claude|chatgpt|grok]
 
@@ -19,7 +19,8 @@ errors go to stderr with exit code 1. `verify-pin` prints its result and exits
 with code 2 when the PIN is wrong, so `aitextaroo verify-pin <<< 4821 && ...` only
 proceeds on a match. `verify-pin` and `set-pin` read the PIN from stdin when
 it isn't given as an argument; at a terminal they ask for it without echoing.
-The API key comes from --api-key, AITEXTAROO_API_KEY, or
+`webhook set` needs the user's PIN if they set one: pass bare `--pin` to read
+it the same way. The API key comes from --api-key, AITEXTAROO_API_KEY, or
 ~/.aitextaroo/credentials.json (aitextaroo-setup --save).
 """
 
@@ -104,8 +105,11 @@ CONNECT: dict[str, str] = {
     "grok": (
         "Grok Bot — say in chat:\n"
         f"  Add a custom MCP server called AI Text-a-roo at {MCP_URL}\n"
-        "To text it back anytime, create a webhook routine and register it:\n"
-        '  aitextaroo webhook set <routine URL> --auth-header "Bearer <routine key>"'
+        "To text it back anytime, ask Grok Bot to create a webhook routine and\n"
+        "register it with the set_webhook tool, or register it yourself:\n"
+        '  aitextaroo webhook set <routine URL> --auth-header "Bearer <routine key>" [--pin]\n'
+        "(--pin asks for your PIN, needed if you set one. You'll get a text saying\n"
+        "where your texts now go; reply UNHOOK anytime to stop forwarding.)"
     ),
 }
 
@@ -121,7 +125,11 @@ def main(argv: list[str] | None = None) -> None:
             "No API key. Run `aitextaroo-setup --phone +1... --save`, "
             "set AITEXTAROO_API_KEY, or pass --api-key."
         )
-    if args.command in ("verify-pin", "set-pin"):
+    # webhook set only needs the PIN when --pin was given (accounts with a PIN).
+    needs_pin = args.command in ("verify-pin", "set-pin") or (
+        args.command == "webhook" and args.action == "set" and args.pin is not None
+    )
+    if needs_pin:
         args.pin = _read_pin(args.pin)
     try:
         result = asyncio.run(_run(args, key))
@@ -166,7 +174,9 @@ async def _run(args: argparse.Namespace, key: str) -> Any:
             return {"checkout_url": await client.upgrade_link()}
         if args.command == "webhook":
             if args.action == "set":
-                return await client.set_webhook(args.url, auth_header=args.auth_header)
+                return await client.set_webhook(
+                    args.url, auth_header=args.auth_header, pin=args.pin
+                )
             return await client.remove_webhook()
         raise AssertionError(f"unhandled command {args.command}")
     finally:
@@ -233,6 +243,13 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--auth-header",
         default=None,
         help='Authorization header value sent with each delivery, e.g. "Bearer <token>"',
+    )
+    s.add_argument(
+        "--pin",
+        nargs="?",
+        const="-",
+        default=None,
+        help="The user's PIN, if they set one. Bare --pin reads it from stdin or a hidden prompt",
     )
     hook.add_parser("remove", help="Stop webhook delivery")
 

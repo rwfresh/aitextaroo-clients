@@ -102,14 +102,25 @@ nohup aitextaroo-bridge > ~/aitextaroo.log 2>&1 &
 
 ## D. Agents with an inbound webhook URL (for example, Grok Bot webhook routines)
 
+The user's texts reach an agent only while it's waiting for a reply, or through a
+webhook. Agents that run only on demand, like a Grok Bot routine, need one so the
+user can text them anytime. With the MCP server, call `set_webhook`. With a shell:
+
 ```bash
-aitextaroo webhook set https://example.com/hook --auth-header "Bearer <receiver token>"
+aitextaroo webhook set https://example.com/hook --auth-header "Bearer <receiver token>" --pin
 ```
 
-Each text the user sends is POSTed as JSON
+`--pin` reads the user's PIN from stdin or a hidden prompt; it's required if they
+set one. Each text the user sends is POSTed as JSON
 (`{"event": "message.inbound", "data": {"text": …, "channel": "sms", "trust_level": "low", "has_pin": …}, "timestamp": …}`)
 with an `X-Signature` header (hex HMAC-SHA256 of the body, keyed with the secret
 returned at registration) and, if set, the `Authorization` header.
+
+Forwarding is protected: the PIN is required if the user has one, AI Text-a-roo
+texts the user the destination host before forwarding starts (if that text can't
+be sent, nothing changes), the user can text `UNHOOK` anytime to stop it, and
+webhook changes are limited to 5 an hour. `aitextaroo webhook remove` (or the
+`remove_webhook` tool) stops forwarding and texts the user.
 
 ## Good texts
 

@@ -145,7 +145,19 @@ class TestCommands:
                 capsys,
             )
         assert out["has_auth_header"] is True
-        client.set_webhook.assert_awaited_once_with("https://hook.example", auth_header="Bearer t")
+        client.set_webhook.assert_awaited_once_with(
+            "https://hook.example", auth_header="Bearer t", pin=None
+        )
+
+    def test_webhook_set_reads_the_pin_from_stdin(self, capsys, monkeypatch) -> None:
+        monkeypatch.setattr("sys.stdin", io.StringIO("4821\n"))
+        client = self._client()
+        client.set_webhook.return_value = {"status": "registered", "owner_notified": True}
+        with patch.object(agent_cli, "TextarooClient", return_value=client):
+            _run_cli(["--api-key", "k", "webhook", "set", "https://hook.example", "--pin"], capsys)
+        client.set_webhook.assert_awaited_once_with(
+            "https://hook.example", auth_header=None, pin="4821"
+        )
 
     def test_api_error_exits_nonzero(self, capsys) -> None:
         from aitextaroo.client import TextarooError
