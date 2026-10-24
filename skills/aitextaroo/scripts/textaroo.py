@@ -4,7 +4,7 @@
 Text your user and read their replies through https://aitextaroo.com.
 
     textaroo.py signup --phone +12125551234
-    textaroo.py confirm --phone +12125551234 --code 123456
+    textaroo.py confirm --phone +12125551234 --code 123456 [--label "Claude on studio-mac"]
     textaroo.py send "Build finished. Open a PR?"
     textaroo.py wait --timeout 90
     textaroo.py recent [--after-id ID]
@@ -14,10 +14,14 @@ Text your user and read their replies through https://aitextaroo.com.
     printf '1111\n4821\n' | textaroo.py set-pin --current   # change it: current, then new
     textaroo.py account
     textaroo.py upgrade
+    textaroo.py connections                       # keys and app sign-ins on the account
+    textaroo.py disconnect <connection id> [--pin]
 
 Authenticated commands read the API key from AITEXTAROO_API_KEY (or --api-key).
 `verify-pin` and `set-pin` read the PIN from stdin unless it's given as an
-argument; at a terminal they ask for it without echoing.
+argument; at a terminal they ask for it without echoing. `disconnect` needs
+the PIN only if the user set one: bare `--pin` reads it the same way.
+Confirming adds a key to the account; nothing else is signed out.
 Output is JSON on stdout; errors go to stderr with a non-zero exit code.
 """
 
@@ -27,12 +31,21 @@ import argparse
 import getpass
 import json
 import os
+import re
+import socket
+import string
 import sys
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
 
 DEFAULT_BASE_URL = "https://api.aitextaroo.com"
+
+# A key label: 1-40 of these characters (the API's rule).
+LABEL_CHARS = frozenset(string.ascii_letters + string.digits + " ._()'@#:+-")
+# Connection ids go into the URL path, so nothing like "../" gets there.
+CONNECTION_ID = re.compile(r"(?:key|app)_[A-Za-z0-9_-]{1,100}")
 
 
 def request(
@@ -77,6 +90,18 @@ def read_pin(arg: str | None, prompt: str) -> str:
     return pin
 
 
+def default_label() -> str:
+    """'aitextaroo skill on <short hostname>', cut to what a key label allows."""
+    try:
+        host = socket.gethostname().split(".")[0]
+    except OSError:
+        host = ""
+    # NFKD splits an accented letter from its accent, so the letter survives.
+    host = "".join(c for c in unicodedata.normalize("NFKD", host) if c in LABEL_CHARS)
+    host = " ".join(host.split())
+    return f"aitextaroo skill on {host}"[:40].rstrip() if host else "aitextaroo skill"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="textaroo.py", description="Text your user through AI Text-a-roo."
@@ -90,9 +115,16 @@ def main() -> None:
     p = sub.add_parser("signup", help="Text a 6-digit verification code to the user's phone")
     p.add_argument("--phone", required=True, help="E.164, e.g. +12125551234")
 
-    p = sub.add_parser("confirm", help="Confirm the code; prints the API key and assigned number")
+    p = sub.add_parser(
+        "confirm", help="Confirm the code; adds a key and prints it with the assigned number"
+    )
     p.add_argument("--phone", required=True)
     p.add_argument("--code", required=True)
+    p.add_argument(
+        "--label",
+        help="Name for the key, shown to the user: 1-40 letters, digits, spaces or "
+        ". _ ( ) ' @ # : + - (default: aitextaroo skill on <this computer's name>)",
+    )
 
     p = sub.add_parser("send", help="Text the user")
     p.add_argument("text")
@@ -122,6 +154,16 @@ def main() -> None:
 
     sub.add_parser("account", help="Plan, usage and assigned number")
     sub.add_parser("upgrade", help="Stripe checkout link for Pro")
+    sub.add_parser("connections", help="Keys and app sign-ins on the account, and forwarding")
+
+    p = sub.add_parser("disconnect", help="Remove a key or app sign-in (the user is texted)")
+    p.add_argument("connection_id", help="The id from `connections` (key_... or app_...)")
+    p.add_argument(
+        "--pin",
+        nargs="?",
+        const="-",
+        help="The user's PIN, if they set one. Bare --pin reads it from stdin or a hidden prompt",
+    )
 
     args = parser.parse_args()
     base = args.base_url.rstrip("/")
@@ -129,9 +171,11 @@ def main() -> None:
     if args.command == "signup":
         result = request("POST", "/auth/verify", base_url=base, body={"phone": args.phone})
     elif args.command == "confirm":
-        result = request(
-            "POST", "/auth/confirm", base_url=base, body={"phone": args.phone, "code": args.code}
-        )
+        label = " ".join((args.label if args.label is not None else default_label()).split())
+        if not 1 <= len(label) <= 40 or not set(label) <= LABEL_CHARS:
+            sys.exit("--label must be 1-40 letters, digits, spaces or . _ ( ) ' @ # : + -")
+        body = {"phone": args.phone, "code": args.code, "label": label}
+        result = request("POST", "/auth/confirm", base_url=base, body=body)
     else:
         if not args.api_key:
             sys.exit(
@@ -142,7 +186,12 @@ def main() -> None:
         current = None
         if args.command == "set-pin" and args.current is not None:
             current = read_pin(args.current, "Current PIN: ")  # first line of stdin
-        if args.command in ("verify-pin", "set-pin"):
+        if args.command == "disconnect" and not CONNECTION_ID.fullmatch(args.connection_id):
+            sys.exit("Not a connection id (they start with key_ or app_); see `connections`.")
+        pin = None
+        if args.command in ("verify-pin", "set-pin") or (
+            args.command == "disconnect" and args.pin is not None
+        ):
             pin = read_pin(args.pin, "New PIN: " if args.command == "set-pin" else "PIN: ")
         if args.command == "send":
             result = request("POST", "/send", base_url=base, api_key=key, body={"text": args.text})
@@ -173,6 +222,16 @@ def main() -> None:
             result = request("POST", "/account/pin", base_url=base, api_key=key, body=body)
         elif args.command == "account":
             result = request("GET", "/account", base_url=base, api_key=key)
+        elif args.command == "connections":
+            result = request("GET", "/account/connections", base_url=base, api_key=key)
+        elif args.command == "disconnect":
+            result = request(
+                "DELETE",
+                f"/account/connections/{args.connection_id}",
+                base_url=base,
+                api_key=key,
+                body={"pin": pin} if pin else None,
+            )
         else:  # upgrade
             result = request("POST", "/billing/checkout", base_url=base, api_key=key)
 
