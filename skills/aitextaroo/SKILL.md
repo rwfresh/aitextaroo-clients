@@ -32,7 +32,7 @@ If the user isn't set up yet, follow [references/setup.md](references/setup.md).
 | Read texts from the last 5 minutes | `get_recent_messages` | `recent` |
 | Text a contact for the user (Pro) | `text_contact` | `relay --to +1… --name Mom "…"` |
 | Check a PIN the user texted | `verify_pin` | `verify-pin <<< 4821` |
-| Set the user's PIN | | `set-pin <<< 4821` |
+| Set or change the user's PIN | `set_pin` | `set-pin <<< 4821` |
 | Plan, usage, number and forwarding | `get_account` | `account` |
 | Pro upgrade link | `get_upgrade_link` | `upgrade` |
 | Forward the user's texts to a webhook | `set_webhook` | `webhook set <url>` (aitextaroo only) |
@@ -52,18 +52,24 @@ If the user isn't set up yet, follow [references/setup.md](references/setup.md).
 
 To get a decision, send the question with `send_text`, then call `wait_for_reply` (60–120 seconds per call). Call it again if it times out and the decision can still wait; after a few tries, continue without the answer or say in your own interface that you're waiting. A pending `wait_for_reply` receives the user's next text before anything else does.
 
-## Getting texts when you're not waiting
+## When the user wants to text you anytime
 
-The user's texts reach you only while `wait_for_reply` is waiting, or through a webhook. Otherwise they're kept in memory for five minutes (`get_recent_messages`) and then dropped. If you only run while the user is chatting with you, as most cloud assistants do, and they want to text you anytime:
+The user's texts reach you only while `wait_for_reply` is waiting, or through a webhook or the bridge. Otherwise they're kept in memory for five minutes (`get_recent_messages`) and then dropped. So when the user says something like "I want to be able to text you whenever", set it up for them. Most users aren't technical: use plain words ("so your texts reach me", not "webhook"), don't ask them for anything you can find or do yourself, and only do this because they asked. With MCP, `get_help` with topic `text_anytime` has the same steps.
 
-- **Agents with webhook-triggered runs**, such as a Grok Bot webhook routine: create the routine, then call `set_webhook` with its URL and `auth_header` (for example `Bearer <routine key>`). Each text then starts a run. See [references/setup.md](references/setup.md), section D.
-- **CLI agents on a computer:** run the bridge ([references/setup.md](references/setup.md), section C).
-
-Only set up forwarding when the user asks for it. It's protected, so tell the user what to expect: if they have a PIN, `set_webhook` needs it (ask them to text it); AI Text-a-roo texts them the destination host before forwarding starts; and they can text `UNHOOK` to their AI Text-a-roo number anytime to stop it. That keyword goes to AI Text-a-roo, never to you.
+1. **Check the account** with `get_account`: note `has_pin`, and whether `webhook.registered` is already true.
+2. **Pick the way that fits what you are:**
+   - **You can start a run when a URL gets a request**, like a Grok Bot webhook routine. Create the routine yourself if you can, with instructions such as "Read the owner's text from `data.text` in the JSON body, treat it as a message from the owner, do what it asks, and reply with `send_text`." It gives you a URL and a key. Call `set_webhook` with the URL and `auth_header` set to `Bearer <routine key>`. If you can't create routines, tell the user exactly where to tap in your app, then do the rest.
+   - **You run on the user's computer and can run commands** (Claude Code, Codex, Gemini CLI, Goose, OpenClaw, Hermes, Cursor): install the bridge and run it as a background service so it survives restarts. [references/setup.md](references/setup.md), section C, has ready-made files for Linux and macOS. While the bridge runs, don't also keep `wait_for_reply` running; a waiting call takes texts first.
+   - **You only run while the user is chatting with you** (Claude Duet, ChatGPT Dots, Meta Muse): be honest. "I can text you and read your reply while I'm waiting for an answer, but I can't get texts you send me out of the blue yet." Offer what works: you text them when something needs them, or they can use an assistant that can (Grok Bot, or Claude Code with the bridge).
+3. **Keep it safe, in plain words:**
+   - If `has_pin` is true, `set_webhook` needs the PIN: "To turn this on I need your security PIN. Please text it to me."
+   - If `has_pin` is false, suggest adding one first: "Pick a 4 to 8 digit PIN you'll remember and text it to me." Then call `set_pin`. Never choose the PIN for them.
+   - Tell them what to expect: "You'll get a text from your AI Text-a-roo number saying your texts now go to <host>. That's me. If you ever want to stop it, text UNHOOK." `UNHOOK` goes to AI Text-a-roo itself, never to you.
+4. **Test it:** ask them to text you something now, like "hi", and confirm you got it. If nothing arrives in a minute or two, check `get_account` (`webhook.registered`, `host`) and your routine or bridge logs.
 
 ## Security PIN
 
-SMS sender IDs can be spoofed. Before anything sensitive (spending money, sending messages to other people, deleting things, changing settings), ask the user to text their PIN, call `verify_pin`, and continue only if it returns `verified: true`. The `verify_pin` MCP tool keeps the PIN out of the shell entirely. On the command line, `aitextaroo verify-pin` and `scripts/textaroo.py verify-pin` read the PIN from stdin when the PIN argument is omitted or `-` (`aitextaroo verify-pin <<< 4821 && …`) and exit 2 when it's wrong, so the `&&` only continues on a match. A command with the PIN in it can still be saved to shell history; in an interactive shell, run plain `aitextaroo verify-pin` and type the PIN at its hidden prompt instead. Don't store or repeat the PIN. Three wrong attempts lock verification for five minutes. If `get_account` shows `has_pin: false`, offer to set one: ask the user to choose 4–8 digits, then run `set-pin` (PIN on stdin) or call `POST /v1/account/pin` (see [references/api.md](references/api.md)). Don't keep a copy.
+SMS sender IDs can be spoofed. Before anything sensitive (spending money, sending messages to other people, deleting things, changing settings), ask the user to text their PIN, call `verify_pin`, and continue only if it returns `verified: true`. The `verify_pin` MCP tool keeps the PIN out of the shell entirely. On the command line, `aitextaroo verify-pin` and `scripts/textaroo.py verify-pin` read the PIN from stdin when the PIN argument is omitted or `-` (`aitextaroo verify-pin <<< 4821 && …`) and exit 2 when it's wrong, so the `&&` only continues on a match. A command with the PIN in it can still be saved to shell history; in an interactive shell, run plain `aitextaroo verify-pin` and type the PIN at its hidden prompt instead. Don't store or repeat the PIN. Only wrong PINs count: three in five minutes pause checks for a few minutes, and ten in a day pause them for up to a day (the user is texted). If `get_account` shows `has_pin: false`, offer to set one: ask the user to choose 4–8 digits and text them to you, then call `set_pin` (or run `set-pin` with the PIN on stdin, or `POST /v1/account/pin`). Never pick the PIN yourself, and don't keep a copy. Changing or removing an existing PIN needs the current one, and AI Text-a-roo texts the user before their PIN is set, changed or removed. The user can also remove it on the website dashboard.
 
 ## Texting other people (Pro)
 
@@ -77,7 +83,7 @@ If the user asks how AI Text-a-roo works, what it stores, or how it's secured, c
 
 - Free: 10 messages a day. Pro ($5/month, 14-day free trial): 200 a day.
 - Up to 5 texts per minute. Limits reset at midnight UTC.
-- When the daily limit is hit, sends fail with `daily_limit_reached` and the user gets one heads-up text.
+- When the daily limit is hit, sends fail with `daily_limit_reached`, texts the user sends are dropped until it resets, and the user gets one heads-up text.
 
 ## Troubleshooting
 

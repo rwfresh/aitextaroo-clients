@@ -56,6 +56,65 @@ nohup aitextaroo-bridge > ~/aitextaroo.log 2>&1 &
 - Check it's running with `pgrep -f aitextaroo-bridge`; read logs with `tail -20 ~/aitextaroo.log`.
 - Only one stream per API key: starting a second bridge disconnects the first.
 
+### Keep it running after a restart
+
+`nohup` stops when the computer restarts. To have the bridge start on its own, run it as a background service. Replace `claude` with your agent (the `--agent` value above). Both snippets record the bridge's full path and the current `PATH` when you run them, so the service can find your agent's command; run them from a shell where `claude` (or your agent) works.
+
+Linux (systemd user service):
+
+```bash
+mkdir -p ~/.config/systemd/user
+cat > ~/.config/systemd/user/aitextaroo-bridge.service <<EOF
+[Unit]
+Description=AI Text-a-roo SMS bridge
+
+[Service]
+ExecStart=$(command -v aitextaroo-bridge) --agent claude
+Environment="PATH=$PATH"
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+EOF
+systemctl --user daemon-reload
+systemctl --user enable --now aitextaroo-bridge
+loginctl enable-linger "$USER"   # keep it running while logged out (may ask for a password)
+```
+
+Check it with `systemctl --user status aitextaroo-bridge`; logs: `journalctl --user -u aitextaroo-bridge -n 20`.
+
+macOS (launchd agent):
+
+```bash
+cat > ~/Library/LaunchAgents/com.aitextaroo.bridge.plist <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.aitextaroo.bridge</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$(command -v aitextaroo-bridge)</string>
+    <string>--agent</string>
+    <string>claude</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>$PATH</string></dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>$HOME/aitextaroo.log</string>
+  <key>StandardErrorPath</key><string>$HOME/aitextaroo.log</string>
+</dict>
+</plist>
+EOF
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.aitextaroo.bridge.plist
+```
+
+Logs: `tail -20 ~/aitextaroo.log`. Restart: `launchctl kickstart -k gui/$(id -u)/com.aitextaroo.bridge`. Stop: `launchctl bootout gui/$(id -u)/com.aitextaroo.bridge` (also run this first if `bootstrap` says it's already loaded).
+
+Then ask the user to text their AI Text-a-roo number, and confirm the reply comes back.
+
 ## D. Agents with an inbound webhook URL
 
 To receive every text the user sends as an HTTP POST (for example, to wake a Grok Bot webhook routine), register a webhook. With the MCP server, call `set_webhook` with `url`, `auth_header` and, if the user has a PIN, `pin`. Over HTTP:
@@ -70,9 +129,9 @@ Leave out `pin` if the user hasn't set one (`get_account` shows `has_pin`). The 
 
 Forwarding is protected:
 
-- Registering needs the user's PIN if they have one. Wrong PINs count toward the usual lockout (3 tries per 5 minutes).
-- Before forwarding starts, AI Text-a-roo texts the user the destination host (never the full URL). If that text can't be sent, nothing changes.
-- The user can text `UNHOOK` to their AI Text-a-roo number anytime to stop forwarding. It's handled by AI Text-a-roo and never reaches an agent.
-- Only public HTTPS URLs are accepted, and at most 5 webhook changes an hour.
+- Registering needs the user's PIN if they have one, and changing or removing the PIN needs the current PIN, so it can't be removed first to get around this. Wrong PINs count toward the usual lockouts (3 per 5 minutes, 10 a day).
+- Before forwarding starts, AI Text-a-roo texts the user where their texts will go: the host only (never the full URL), and which host it replaces. If that text can't be sent, nothing changes.
+- The user can text `UNHOOK` to their AI Text-a-roo number anytime to stop forwarding. AI Text-a-roo handles it first, so it never reaches an agent or a contact.
+- Only public HTTPS URLs with plain-ASCII host names are accepted, and at most 5 webhook changes an hour and 10 a day.
 
 Remove it with `DELETE /v1/webhook` or `remove_webhook`; the user is texted that forwarding is off.

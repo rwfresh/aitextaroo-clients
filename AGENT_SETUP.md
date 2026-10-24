@@ -127,8 +127,21 @@ webhook changes are limited to 5 an hour. `aitextaroo webhook remove` (or the
 Plain text, short, and say what reply you need. Before sensitive actions, ask
 the user to text their PIN and check it (`aitextaroo verify-pin`, which reads
 the PIN from stdin and exits 2 when it's wrong, or the `verify_pin` MCP tool).
-No PIN yet? Ask the user to pick 4–8 digits and run `aitextaroo set-pin`. The
-PIN is the only secret to ask for by text: never ask for passwords or card numbers.
+No PIN yet? Ask the user to pick 4–8 digits and run `aitextaroo set-pin` (or the
+`set_pin` MCP tool); never choose it for them. Changing or removing a PIN needs the
+current one (`set-pin --current`, `remove-pin`), and the user is texted before any
+change. The PIN is the only secret to ask for by text: never ask for passwords or
+card numbers.
+
+## When the user wants to text you anytime
+
+Follow the "When the user wants to text you anytime" section of the
+[Agent Skill](skills/aitextaroo/SKILL.md) (or the MCP `get_help` topic
+`text_anytime`). In short: agents with webhook routines (Grok Bot) register the
+routine with `set_webhook`; agents on the user's computer run the bridge as a
+background service ([setup reference](skills/aitextaroo/references/setup.md),
+section C); chat-only assistants say honestly that they can't receive surprise
+texts yet. Use plain words with the user and finish with a live test text.
 
 ## Plans and limits
 

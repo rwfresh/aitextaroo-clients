@@ -368,32 +368,42 @@ class TextarooClient:
         response = await client.post("/v1/verify-pin", json={"pin": pin})
         return _parse_json_response(response, "PIN verification failed")
 
-    async def set_pin(self, pin: str) -> dict[str, Any]:
-        """Set or change the user's security PIN (4–8 digits).
+    async def set_pin(self, pin: str, current_pin: str | None = None) -> dict[str, Any]:
+        """Set the user's security PIN (4–8 digits), or change it.
 
-        Ask the user to choose it; don't store a copy.
+        Ask the user to choose it; never pick one for them, and don't store a
+        copy. Changing an existing PIN needs current_pin. The user is texted
+        before the change.
 
         Returns:
-            {"status": "pin_set"}
+            {"status": "pin_set"} or {"status": "pin_changed"}
 
         Raises:
-            TextarooError: If the PIN isn't 4–8 digits or the API returns an error.
+            TextarooError: "current_pin_required", "pin_incorrect", "pin_locked",
+                "owner_notice_failed" (nothing changed), or another API error.
         """
+        body: dict[str, Any] = {"pin": pin}
+        if current_pin:
+            body["current_pin"] = current_pin
         client = await self._get_client()
-        response = await client.post("/v1/account/pin", json={"pin": pin})
+        response = await client.post("/v1/account/pin", json=body)
         return _parse_json_response(response, "Setting the PIN failed")
 
-    async def remove_pin(self) -> dict[str, Any]:
-        """Remove the user's security PIN.
+    async def remove_pin(self, current_pin: str) -> dict[str, Any]:
+        """Remove the user's security PIN, which needs the current one.
+
+        The user is texted before the change.
 
         Returns:
-            {"status": "pin_removed"}
+            {"status": "pin_removed"} or {"status": "pin_not_set"}
 
         Raises:
-            TextarooError: If the API returns an error.
+            TextarooError: "current_pin_required", "pin_incorrect", or another API error.
         """
         client = await self._get_client()
-        response = await client.delete("/v1/account/pin")
+        response = await client.request(
+            "DELETE", "/v1/account/pin", json={"current_pin": current_pin}
+        )
         return _parse_json_response(response, "Removing the PIN failed")
 
     # ── Webhooks ────────────────────────────────────────────────

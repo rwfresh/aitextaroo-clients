@@ -8,6 +8,8 @@ Usage:
     aitextaroo relay --to +12125550100 --name Mom "Happy birthday!"
     aitextaroo verify-pin <<< 4821
     aitextaroo set-pin <<< 4821
+    aitextaroo set-pin --current           # change it: current PIN, then the new one
+    aitextaroo remove-pin                  # asks for the current PIN
     aitextaroo account
     aitextaroo upgrade
     aitextaroo webhook set https://example.com/hook [--auth-header "Bearer ..."] [--pin]
@@ -125,12 +127,16 @@ def main(argv: list[str] | None = None) -> None:
             "No API key. Run `aitextaroo-setup --phone +1... --save`, "
             "set AITEXTAROO_API_KEY, or pass --api-key."
         )
+    # Changing an existing PIN: the current one comes first (on stdin, the
+    # first line), then the new one.
+    if args.command == "set-pin" and args.current is not None:
+        args.current = _read_pin(args.current, "Current PIN: ")
     # webhook set only needs the PIN when --pin was given (accounts with a PIN).
-    needs_pin = args.command in ("verify-pin", "set-pin") or (
+    needs_pin = args.command in ("verify-pin", "set-pin", "remove-pin") or (
         args.command == "webhook" and args.action == "set" and args.pin is not None
     )
     if needs_pin:
-        args.pin = _read_pin(args.pin)
+        args.pin = _read_pin(args.pin, "New PIN: " if args.command == "set-pin" else "PIN: ")
     try:
         result = asyncio.run(_run(args, key))
     except TextarooError as exc:
@@ -167,7 +173,9 @@ async def _run(args: argparse.Namespace, key: str) -> Any:
         if args.command == "verify-pin":
             return await client.verify_pin(args.pin)
         if args.command == "set-pin":
-            return await client.set_pin(args.pin)
+            return await client.set_pin(args.pin, current_pin=args.current)
+        if args.command == "remove-pin":
+            return await client.remove_pin(args.pin)
         if args.command == "account":
             return await client.account()
         if args.command == "upgrade":
@@ -230,7 +238,17 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("pin", nargs="?", help="The PIN (default: read from stdin)")
 
     p = sub.add_parser("set-pin", help="Set or change the user's security PIN (4-8 digits)")
-    p.add_argument("pin", nargs="?", help="The PIN (default: read from stdin)")
+    p.add_argument("pin", nargs="?", help="The new PIN (default: read from stdin)")
+    p.add_argument(
+        "--current",
+        nargs="?",
+        const="-",
+        default=None,
+        help="The current PIN, needed to change one. Bare --current reads it from stdin first",
+    )
+
+    p = sub.add_parser("remove-pin", help="Remove the user's security PIN (needs the current one)")
+    p.add_argument("pin", nargs="?", help="The current PIN (default: read from stdin)")
 
     sub.add_parser("account", help="Plan, usage and the AI's phone number")
     sub.add_parser("upgrade", help="Stripe checkout link for Pro")
@@ -259,15 +277,15 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _read_pin(arg: str | None) -> str:
+def _read_pin(arg: str | None, prompt: str = "PIN: ") -> str:
     """The PIN from the argument, or from stdin when it's omitted or "-".
 
-    At a terminal it's a hidden prompt; otherwise the first line of stdin.
+    At a terminal it's a hidden prompt; otherwise the next line of stdin.
     """
     if arg not in (None, "-"):
         pin = arg
     elif sys.stdin.isatty():
-        pin = getpass.getpass("PIN: ")
+        pin = getpass.getpass(prompt)
     else:
         pin = sys.stdin.readline()
     pin = pin.strip()

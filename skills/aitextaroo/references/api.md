@@ -28,8 +28,9 @@ Delivery order: a pending `/messages/wait` (or MCP `wait_for_reply`) gets the ne
 | Method | Path | Body | Notes |
 |---|---|---|---|
 | GET | `/account` | | Plan, assigned number, `has_pin`, `messages_today`, `daily_limit`, and `webhook` (whether texts are forwarded, and to which host). |
-| POST | `/account/pin` | `{"pin": "4821"}` | Set or change the security PIN (4–8 digits). `DELETE /account/pin` removes it. |
-| POST | `/verify-pin` | `{"pin": "4821"}` | `{"verified": bool, "attempts_remaining": int \| null}`. 3 attempts per 5 minutes. |
+| POST | `/account/pin` | `{"pin": "4821", "current_pin": "1111"}` | Set the security PIN (4–8 digits, chosen by the user), or change it: `current_pin` is required when a PIN exists. The user is texted first. Returns `pin_set` or `pin_changed`. |
+| DELETE | `/account/pin` | `{"current_pin": "1111"}` | Remove the PIN (needs the current one; the user is texted first). |
+| POST | `/verify-pin` | `{"pin": "4821"}` | `{"verified": bool, "attempts_remaining": int \| null}`. Only wrong PINs count: 3 per 5 minutes and 10 a day pause checks. |
 | POST | `/webhook` | `{"url": "https://…", "auth_header": "Bearer …", "pin": "4821"}` | Forward inbound texts to a URL. `auth_header` is optional; `pin` is required if the user has one. The user is texted the destination first and can reply `UNHOOK` to stop it. |
 | DELETE | `/webhook` | | Stop webhook delivery (the user is texted). |
 
