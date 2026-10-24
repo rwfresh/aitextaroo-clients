@@ -16,7 +16,7 @@ Each confirmation adds a key named `label` (optional, 1–40 letters, digits, sp
 | Method | Path | Body / query | Notes |
 |---|---|---|---|
 | POST | `/send` | `{"text": "…"}` | Texts the user. Max 1,600 characters. |
-| POST | `/send` | `{"text": "…", "to": "+1…", "recipient_name": "Mom"}` | Texts a contact (Pro). Replies are forwarded to the user. |
+| POST | `/send` | `{"text": "…", "to": "+1…", "recipient_name": "Mom"}` | Texts a contact (Pro). Their replies are forwarded to the user for an hour after the last text to them (yours, or the user's `>` reply). |
 | POST | `/messages/wait` | `{"timeout_seconds": 60}` (1–120) | Waits for the user's next text. Returns `{"message": {...} \| null, "timed_out": bool}`. |
 | GET | `/messages/recent` | `?after_id=<message id>` (optional) | Texts from the last 5 minutes: `{"messages": [...], "retention_seconds": 300}`. |
 | GET | `/stream` | `Accept: text/event-stream` | Server-Sent Events stream of inbound texts. One stream per account; supports `Last-Event-ID`. |
@@ -58,6 +58,6 @@ Errors return `{"error": {"code": "…", "message": "…"}}` (authentication fai
 - `pin_required` / `pin_incorrect` (403): this change needs the user's PIN, or the PIN was wrong (wrong PINs count toward the lockout).
 - `connection_not_found` (404): no key or app sign-in with that id on this account.
 - `rate_limit_exceeded` (429): more than 5 texts in a minute, or too many PIN, webhook or connection changes.
-- `daily_limit_reached` (429): resets at midnight UTC. Texts you send, contacts' replies forwarded to the user and the user's `>` replies count; the user's own texts to you don't. One contact's replies are forwarded at most 20 an hour and 50 a day.
+- `daily_limit_reached` (429): resets at midnight UTC; until then texts pause both ways. Texts you send, contacts' replies forwarded to the user and the user's `>` replies count; the user's own texts to you don't. One contact's replies are forwarded at most 20 an hour and 50 a day, and none are once 80% of the day's limit is used.
 - `pin_locked` (429): too many wrong PIN attempts; try again in a few minutes.
 - `temporarily_unavailable` (503): security checks are unavailable right now, so nothing changed; try again in a minute.

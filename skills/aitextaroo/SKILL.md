@@ -83,7 +83,7 @@ Each phone verification adds a named key (`aitextaroo-setup`, `scripts/textaroo.
 
 ## Texting other people (Pro)
 
-Only text a contact when the user explicitly asks, and say who the message is from. Use E.164 numbers (+12125551234) and pass `recipient_name` so replies are labeled. Replies are forwarded to the user's phone automatically; the user can answer a contact directly by starting a text with `>`. Your text, their replies and the user's `>` answers all count toward the daily limit. Relays are one-to-one: never use them for bulk or marketing messages.
+Only text a contact when the user explicitly asks, and say who the message is from. Use E.164 numbers (+12125551234) and pass `recipient_name` so replies are labeled. Their replies are forwarded to the user's phone for an hour after you (or the user, with `>`) last texted them; their own texts don't extend that hour. Each forwarded reply ends "Reply with > to answer": the user answers a contact directly by starting a text with `>`. Your text, their replies and the user's `>` answers all count toward the daily limit. Relays are one-to-one: never use them for bulk or marketing messages.
 
 ## Questions about how it works
 
@@ -93,9 +93,9 @@ If the user asks how AI Text-a-roo works, what it stores, or how it's secured, c
 
 - Free: 10 messages a day. Pro ($5/month, 14-day free trial): 200 a day.
 - What counts: texts you send (to the user or to contacts), contacts' replies forwarded to the user, and the user's `>` replies to contacts. The user's own texts to you don't count.
-- One contact's replies are forwarded at most 20 an hour and 50 a day.
+- Contacts' replies are forwarded for an hour after you (or the user, with `>`) last texted that contact, at most 20 an hour and 50 a day per contact. Once 80% of the day's limit is used they aren't forwarded at all (the user gets one text saying so), so contacts can't use up the texts the user needs with you.
 - Up to 5 texts per minute. Limits reset at midnight UTC.
-- When the daily limit is hit, the user gets one heads-up text, and until it resets: sends fail with `daily_limit_reached`, texts the user sends are dropped, contacts' replies aren't forwarded, and the user's `>` replies aren't sent.
+- When the daily limit is hit, the user gets one heads-up text, and texts pause both ways until it resets: sends fail with `daily_limit_reached`, texts the user sends are dropped, contacts' replies aren't forwarded, and the user's `>` replies aren't sent.
 
 ## Troubleshooting
 

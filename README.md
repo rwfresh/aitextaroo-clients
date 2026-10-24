@@ -150,7 +150,7 @@ asyncio.run(main())
 | `wait_for_reply(timeout_seconds=60)` | Wait up to 120 s for the user's next text (or one that arrived since your last send). Returns an `InboundMessage` or `None`. |
 | `recent_messages(after_id=None)` | Texts from the last five minutes. |
 | `listen()` | Async iterator over inbound texts via SSE, with automatic reconnect and replay. Raises `TextarooError` when reconnecting can't help: `unauthorized`, `credential_revoked` (the key was removed) or `evicted` (another stream took over the account). |
-| `text_contact(to, text, recipient_name=None)` | Pro: text someone else; their replies go to the user's phone. |
+| `text_contact(to, text, recipient_name=None)` | Pro: text someone else; their replies go to the user's phone for an hour after the last text to them. |
 | `verify_pin(pin)` | Check a PIN the user texted: `{"verified": bool, "attempts_remaining": int \| None}`. |
 | `set_pin(pin, current_pin=None)` / `remove_pin(current_pin)` | Set the security PIN the user chose (4–8 digits), change it (needs `current_pin`), or remove it (needs the current PIN). The user is texted before any change. |
 | `set_webhook(url, auth_header=None, pin=None)` / `remove_webhook()` | Forward inbound texts to a URL (signed with `X-Signature`). `pin` is required if the user has one; the user is texted where their texts go and can reply `UNHOOK` to stop it. |
@@ -189,8 +189,11 @@ Run `aitextaroo connect` for every client's exact setup. Reference: <https://ait
 
 What counts toward the daily limit: texts your agent sends (to you or your contacts), your
 contacts' replies forwarded to you, and your `>` replies to them. Your own texts to your agent
-don't count. One contact's replies are forwarded at most 20 an hour and 50 a day. Up to 5
-texts per minute. Limits reset at midnight UTC.
+don't count, but once the limit is reached, texts pause both ways until it resets. A
+contact's replies are forwarded for an hour after your agent (or you, with `>`) last texted
+them, at most 20 an hour and 50 a day, and they stop being forwarded once 80% of the day's
+limit is used (you get one text saying so), so contacts can't use up the texts you need with
+your agent. Up to 5 texts per minute. Limits reset at midnight UTC.
 
 ## Privacy and security
 

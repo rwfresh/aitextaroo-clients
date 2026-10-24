@@ -175,6 +175,10 @@ texts yet. Use plain words with the user and finish with a live test text.
   texting the user's contacts with replies forwarded to the user.
 - What counts: texts you send (to the user or their contacts), contacts' replies
   forwarded to the user, and the user's `>` replies to them. The user's own texts
-  to you don't count. One contact's replies are forwarded at most 20 an hour and
-  50 a day.
+  to you don't count, but once the limit is reached texts pause both ways until
+  it resets.
+- A contact's replies are forwarded for an hour after you (or the user, with `>`)
+  last texted that contact, at most 20 an hour and 50 a day, and they stop being
+  forwarded once 80% of the day's limit is used (the user gets one text saying
+  so), so contacts can't use up the texts the user needs with you.
 - Up to 5 texts per minute. Limits reset at midnight UTC.

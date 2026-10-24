@@ -316,7 +316,9 @@ class TextarooClient:
         """Text someone else on the user's behalf (Pro plan).
 
         The contact sees the AI's number. Their replies are forwarded to
-        the user's phone, labeled with recipient_name when given.
+        the user's phone, labeled with recipient_name when given, for an
+        hour after the last text to them (from you, or the user's ">" reply).
+        They count toward the daily limit, and stop once 80% of it is used.
 
         Args:
             to: The contact's number in E.164 format (e.g., "+12125550100").
