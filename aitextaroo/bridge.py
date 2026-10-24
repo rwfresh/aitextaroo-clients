@@ -84,8 +84,14 @@ class Bridge:
     async def run(self) -> None:
         """Listen for SMS and bridge them to the agent.
 
-        Runs indefinitely. The TextarooClient handles SSE reconnection
+        Runs until cancelled; the TextarooClient handles SSE reconnection
         automatically. Call this from asyncio.run() or as a task.
+
+        Raises:
+            TextarooError: When the stream stops for good: the key was
+                rejected ("unauthorized") or removed from the account
+                ("credential_revoked"), or another stream took over the
+                account ("evicted").
         """
         try:
             async for message in self._client.listen():

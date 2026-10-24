@@ -5,6 +5,12 @@ Usage:
     aitextaroo-bridge --api-key YOUR_KEY --agent claude
     aitextaroo-bridge --agent-command "pnpm --silent --dir ~/nanoclaw run chat"
     AITEXTAROO_API_KEY=YOUR_KEY aitextaroo-bridge
+
+The bridge runs until stopped. It also stops, and exits cleanly (code 0), when
+its key is removed from the account or another bridge or app takes over the
+account's texts: restarting can't help then, so a service manager set to
+restart on failure leaves it stopped instead of fighting the other bridge.
+A rejected key (401) is an error (code 1).
 """
 
 from __future__ import annotations
@@ -19,15 +25,15 @@ from pathlib import Path
 
 from aitextaroo.agents import BUILTIN_AGENTS, create_agent, custom_agent, detect_agents
 from aitextaroo.bridge import Bridge
-from aitextaroo.client import TextarooClient
+from aitextaroo.client import STREAM_STOPS, TextarooClient, TextarooError
 from aitextaroo.credentials import load_api_key
 
 DEFAULT_SESSIONS_DIR = Path.home() / ".aitextaroo" / "sessions"
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """Parse arguments, wire dependencies, run the bridge."""
-    args = _parse_args()
+    args = _parse_args(argv)
     _configure_logging(args.verbose)
 
     key = load_api_key(args.api_key)
@@ -71,9 +77,21 @@ def main() -> None:
         asyncio.run(bridge.run())
     except KeyboardInterrupt:
         print("\nBridge stopped.")
+    except TextarooError as exc:
+        if exc.code in STREAM_STOPS:
+            # Restarting can't help, so exit 0 (see the module docstring).
+            print(f"Bridge stopped: {exc.message}", file=sys.stderr)
+            return
+        message = f"{exc.code}: {exc.message}"
+        if exc.code == "unauthorized":
+            message += (
+                ". If the key was removed from your account, run aitextaroo-setup --save "
+                "to add a new one."
+            )
+        _exit_error(message)
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Build and parse CLI arguments."""
     parser = argparse.ArgumentParser(
         prog="aitextaroo-bridge",
@@ -118,7 +136,7 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Enable debug logging",
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def _configure_logging(verbose: bool) -> None:

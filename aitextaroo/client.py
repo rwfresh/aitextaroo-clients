@@ -15,6 +15,7 @@ configuration is needed — it's a single outbound HTTPS connection.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
@@ -44,6 +45,21 @@ MIN_WAIT_SECONDS = 1
 MAX_WAIT_SECONDS = 120
 # Extra HTTP time on top of the wait so the server answers before we give up.
 WAIT_HTTP_MARGIN = 15.0
+
+# Stream error events after which reconnecting can't help, so listen() raises
+# a TextarooError with that code instead. Reconnecting after "evicted" would
+# just knock the other stream off in turn, back and forth.
+CREDENTIAL_REVOKED = "credential_revoked"
+EVICTED = "evicted"
+STREAM_STOPS: dict[str, str] = {
+    CREDENTIAL_REVOKED: (
+        "This key was removed from your account; run aitextaroo-setup --save to add a new one."
+    ),
+    EVICTED: (
+        "Another bridge or app is receiving this account's texts now, and only one "
+        "can at a time. Stop the other one to use this one."
+    ),
+}
 
 # A connection id goes into the request path, so only these characters get
 # there: "../../webhook" would otherwise collapse into DELETE /v1/webhook.
@@ -564,12 +580,21 @@ class TextarooClient:
         Yields InboundMessage objects as they arrive. Handles
         reconnection and Last-Event-ID replay automatically.
 
+        An account has one stream at a time: opening another one (from any
+        of its keys) ends this one with "evicted".
+
         Args:
             auto_reconnect: If True (default), reconnects on disconnect
                 with exponential backoff and Last-Event-ID replay.
 
         Yields:
             InboundMessage for each received SMS.
+
+        Raises:
+            TextarooError: When reconnecting can't help, so the stream stops for
+                good: "unauthorized" (401: the key is wrong or was removed),
+                "credential_revoked" (the key was removed from the account while
+                connected) or "evicted" (another stream took over the account).
 
         Example:
             >>> async for msg in client.listen():
@@ -580,18 +605,25 @@ class TextarooClient:
 
         while True:
             try:
-                async for event in self._stream_events():
-                    if event.type == EventType.CONNECTED:
-                        logger.info("Stream connected: %s", event.connected)
-                        delay = DEFAULT_RECONNECT_DELAY  # Reset backoff
+                # aclosing: when this stops (or the caller stops iterating),
+                # the HTTP stream closes now, not whenever it's collected.
+                async with contextlib.aclosing(self._stream_events()) as events:
+                    async for event in events:
+                        if event.type == EventType.CONNECTED:
+                            logger.info("Stream connected: %s", event.connected)
+                            delay = DEFAULT_RECONNECT_DELAY  # Reset backoff
 
-                    elif event.type == EventType.MESSAGE and event.message:
-                        yield event.message
+                        elif event.type == EventType.MESSAGE and event.message:
+                            yield event.message
 
-                    elif event.type == EventType.ERROR and event.error:
-                        logger.warning("Stream error: %s", event.error)
-                        if event.error.retry_after:
-                            delay = float(event.error.retry_after)
+                        elif event.type == EventType.ERROR and event.error:
+                            stop = STREAM_STOPS.get(event.error.code)
+                            if stop:
+                                logger.warning("Stream stopped: %s", event.error.code)
+                                raise TextarooError(code=event.error.code, message=stop)
+                            logger.warning("Stream error: %s", event.error)
+                            if event.error.retry_after:
+                                delay = float(event.error.retry_after)
 
             except (httpx.RemoteProtocolError, httpx.ReadError, httpx.ConnectError) as exc:
                 logger.warning("Stream disconnected: %s", type(exc).__name__)
@@ -601,7 +633,7 @@ class TextarooClient:
                 if exc.response.status_code == 401:
                     raise TextarooError(
                         code="unauthorized",
-                        message="Invalid API key",
+                        message="Invalid API key (wrong, or removed from the account)",
                         status_code=401,
                     ) from exc
 
