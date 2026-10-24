@@ -11,6 +11,7 @@ Text your user and read their replies through https://aitextaroo.com.
     textaroo.py relay --to +12125550100 --name Mom "Happy birthday!"
     textaroo.py verify-pin <<< 4821
     textaroo.py set-pin <<< 4821
+    printf '1111\n4821\n' | textaroo.py set-pin --current   # change it: current, then new
     textaroo.py account
     textaroo.py upgrade
 
@@ -62,6 +63,20 @@ def request(
         sys.exit(f"Network error: {exc.reason}")
 
 
+def read_pin(arg: str | None, prompt: str) -> str:
+    """The PIN from the argument, or the next line of stdin (a hidden prompt at a terminal)."""
+    if arg not in (None, "-"):
+        pin = arg
+    elif sys.stdin.isatty():
+        pin = getpass.getpass(prompt)
+    else:
+        pin = sys.stdin.readline()
+    pin = pin.strip()
+    if not pin:
+        sys.exit("No PIN given: pass it on stdin (verify-pin <<< 4821) or as an argument.")
+    return pin
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="textaroo.py", description="Text your user through AI Text-a-roo."
@@ -97,7 +112,13 @@ def main() -> None:
     p.add_argument("pin", nargs="?", help="The PIN (default: read from stdin)")
 
     p = sub.add_parser("set-pin", help="Set or change the user's security PIN (4-8 digits)")
-    p.add_argument("pin", nargs="?", help="The PIN (default: read from stdin)")
+    p.add_argument("pin", nargs="?", help="The new PIN (default: read from stdin)")
+    p.add_argument(
+        "--current",
+        nargs="?",
+        const="-",
+        help="The current PIN, needed to change one. Bare --current reads it from stdin first",
+    )
 
     sub.add_parser("account", help="Plan, usage and assigned number")
     sub.add_parser("upgrade", help="Stripe checkout link for Pro")
@@ -118,16 +139,11 @@ def main() -> None:
                 "(run signup and confirm first)."
             )
         key = args.api_key
+        current = None
+        if args.command == "set-pin" and args.current is not None:
+            current = read_pin(args.current, "Current PIN: ")  # first line of stdin
         if args.command in ("verify-pin", "set-pin"):
-            if args.pin not in (None, "-"):
-                pin = args.pin
-            elif sys.stdin.isatty():
-                pin = getpass.getpass("PIN: ")  # hidden prompt at a terminal
-            else:
-                pin = sys.stdin.readline()
-            pin = pin.strip()
-            if not pin:
-                sys.exit("No PIN given: pass it on stdin (verify-pin <<< 4821) or as an argument.")
+            pin = read_pin(args.pin, "New PIN: " if args.command == "set-pin" else "PIN: ")
         if args.command == "send":
             result = request("POST", "/send", base_url=base, api_key=key, body={"text": args.text})
         elif args.command == "relay":
@@ -153,7 +169,8 @@ def main() -> None:
         elif args.command == "verify-pin":
             result = request("POST", "/verify-pin", base_url=base, api_key=key, body={"pin": pin})
         elif args.command == "set-pin":
-            result = request("POST", "/account/pin", base_url=base, api_key=key, body={"pin": pin})
+            body = {"pin": pin, **({"current_pin": current} if current else {})}
+            result = request("POST", "/account/pin", base_url=base, api_key=key, body=body)
         elif args.command == "account":
             result = request("GET", "/account", base_url=base, api_key=key)
         else:  # upgrade

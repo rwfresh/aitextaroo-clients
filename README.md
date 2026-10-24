@@ -41,6 +41,8 @@ aitextaroo send "Hello from my agent!"
 
 `--save` stores the API key in `~/.aitextaroo/credentials.json` with owner-only permissions.
 `aitextaroo` and `aitextaroo-bridge` find it there, or in `AITEXTAROO_API_KEY`, or in `--api-key`.
+Verifying a phone that already has an account makes a new key: apps connected before are
+signed out and webhook forwarding is turned off.
 
 ## The `aitextaroo` command
 
@@ -58,9 +60,11 @@ aitextaroo recent                                                       # texts 
 aitextaroo relay --to +12125550100 --name Mom "Happy birthday!"        # Pro: text a contact
 aitextaroo verify-pin                                                   # check a PIN (hidden prompt)
 aitextaroo set-pin                                                      # set the user's PIN (4-8 digits)
+aitextaroo set-pin --current                                            # change it: current PIN, then the new one
+aitextaroo remove-pin                                                   # needs the current PIN
 aitextaroo account
 aitextaroo upgrade                                                      # Stripe link for Pro
-aitextaroo webhook set https://example.com/hook --auth-header "Bearer <token>"
+aitextaroo webhook set https://example.com/hook --auth-header "Bearer <token>"   # add --pin if a PIN is set
 aitextaroo connect [claude-code|codex|gemini|cursor|muse-code|claude|chatgpt|grok]
 ```
 
@@ -130,8 +134,8 @@ asyncio.run(main())
 | `listen()` | Async iterator over inbound texts via SSE, with automatic reconnect and replay. |
 | `text_contact(to, text, recipient_name=None)` | Pro: text someone else; their replies go to the user's phone. |
 | `verify_pin(pin)` | Check a PIN the user texted: `{"verified": bool, "attempts_remaining": int \| None}`. |
-| `set_pin(pin)` / `remove_pin()` | Set, change or remove the user's security PIN (4–8 digits). |
-| `set_webhook(url, auth_header=None)` / `remove_webhook()` | Forward inbound texts to a URL (signed with `X-Signature`). |
+| `set_pin(pin, current_pin=None)` / `remove_pin(current_pin)` | Set the security PIN the user chose (4–8 digits), change it (needs `current_pin`), or remove it (needs the current PIN). The user is texted before any change. |
+| `set_webhook(url, auth_header=None, pin=None)` / `remove_webhook()` | Forward inbound texts to a URL (signed with `X-Signature`). `pin` is required if the user has one; the user is texted where their texts go and can reply `UNHOOK` to stop it. |
 | `account()` | Plan, assigned number, usage and daily limit. |
 | `upgrade_link()` | Stripe checkout link for Pro. |
 | `TextarooClient.request_verification(phone)` / `confirm_verification(phone, code)` | Sign-up, no key needed. |
@@ -142,8 +146,10 @@ asyncio.run(main())
 ## MCP server
 
 `https://api.aitextaroo.com/mcp` (streamable HTTP). Tools: `send_text`, `wait_for_reply`,
-`get_recent_messages`, `text_contact`, `verify_pin`, `get_account`, `get_upgrade_link`.
-Clients sign in with OAuth, or send `Authorization: Bearer <API key>`:
+`get_recent_messages`, `text_contact`, `verify_pin`, `get_account`, `get_upgrade_link`,
+`set_webhook`, `remove_webhook`, and `get_help` (how it works and how it's secured, for
+answering the user's questions). Clients sign in with OAuth, or send
+`Authorization: Bearer <API key>`:
 
 ```bash
 claude mcp add --transport http --scope user aitextaroo https://api.aitextaroo.com/mcp \

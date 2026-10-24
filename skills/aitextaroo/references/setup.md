@@ -56,14 +56,94 @@ nohup aitextaroo-bridge > ~/aitextaroo.log 2>&1 &
 - Check it's running with `pgrep -f aitextaroo-bridge`; read logs with `tail -20 ~/aitextaroo.log`.
 - Only one stream per API key: starting a second bridge disconnects the first.
 
+### Keep it running after a restart
+
+`nohup` stops when the computer restarts. To have the bridge start on its own, run it as a background service. Replace `claude` with your agent (the `--agent` value above). Both snippets record the bridge's full path and the current `PATH` when you run them, so the service can find your agent's command; run them from a shell where `claude` (or your agent) works. Each starts by checking the bridge is installed, and stops if it isn't (run `pipx ensurepath` and open a new shell, then try again).
+
+Linux (systemd user service):
+
+```bash
+(  # a subshell: stops at the first error without closing your shell
+set -e
+BRIDGE=$(command -v aitextaroo-bridge) || { echo "aitextaroo-bridge not found on PATH"; exit 1; }
+mkdir -p ~/.config/systemd/user
+cat > ~/.config/systemd/user/aitextaroo-bridge.service <<EOF
+[Unit]
+Description=AI Text-a-roo SMS bridge
+
+[Service]
+ExecStart=$BRIDGE --agent claude
+WorkingDirectory=$HOME
+Environment="PATH=$PATH"
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+EOF
+systemctl --user daemon-reload
+systemctl --user enable --now aitextaroo-bridge
+loginctl enable-linger "$USER"   # keep it running while logged out
+)
+```
+
+If `loginctl enable-linger` fails (it can need a password, and an agent's shell can't type one), ask the user to run `sudo loginctl enable-linger $USER` in Terminal. Without it, the bridge runs only while they're logged in. Check it with `systemctl --user status aitextaroo-bridge`; logs: `journalctl --user -u aitextaroo-bridge -n 20`.
+
+macOS (launchd agent):
+
+```bash
+(  # a subshell: stops at the first error without closing your shell
+set -e
+BRIDGE=$(command -v aitextaroo-bridge) || { echo "aitextaroo-bridge not found on PATH"; exit 1; }
+mkdir -p ~/Library/LaunchAgents
+cat > ~/Library/LaunchAgents/com.aitextaroo.bridge.plist <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.aitextaroo.bridge</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$BRIDGE</string>
+    <string>--agent</string>
+    <string>claude</string>
+  </array>
+  <key>WorkingDirectory</key><string>$HOME</string>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>$PATH</string></dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>$HOME/aitextaroo.log</string>
+  <key>StandardErrorPath</key><string>$HOME/aitextaroo.log</string>
+</dict>
+</plist>
+EOF
+launchctl bootout gui/$(id -u)/com.aitextaroo.bridge 2>/dev/null || true   # unload any older copy first
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.aitextaroo.bridge.plist
+)
+```
+
+Logs: `tail -20 ~/aitextaroo.log`. Restart: `launchctl kickstart -k gui/$(id -u)/com.aitextaroo.bridge`. Stop: `launchctl bootout gui/$(id -u)/com.aitextaroo.bridge`.
+
+Then ask the user to text their AI Text-a-roo number and tell you whether the reply came back. Don't call `wait_for_reply` while testing: a waiting call takes the text before the bridge does.
+
 ## D. Agents with an inbound webhook URL
 
-To receive every text the user sends as an HTTP POST (for example, to wake a Grok Bot webhook routine), register a webhook:
+To receive the user's texts as HTTP POSTs (for example, to wake a Grok Bot webhook routine), register a webhook. A pending `wait_for_reply` still gets a text first, and a live bridge or `/stream` connection gets it too (see the delivery order in [api.md](api.md)). With the MCP server, call `set_webhook` with `url`, `auth_header` and, if the user has a PIN, `pin`. Over HTTP:
 
 ```
 POST https://api.aitextaroo.com/v1/webhook
 Authorization: Bearer <API key>
-{"url": "https://example.com/hook", "auth_header": "Bearer <token the receiver expects>"}
+{"url": "https://example.com/hook", "auth_header": "Bearer <token the receiver expects>", "pin": "4821"}
 ```
 
-The response includes a signing secret. Each delivery is a JSON body like `{"event": "message.inbound", "data": {"text": "…", "channel": "sms", "trust_level": "low", "has_pin": true}, "timestamp": 1761264000.0}` with an `X-Signature` header (hex HMAC-SHA256 of the body, keyed with the secret) and, if you set `auth_header`, an `Authorization` header with that value. Remove it with `DELETE /v1/webhook`.
+Leave out `pin` if the user hasn't set one (`get_account` shows `has_pin`). The response includes a signing secret. Each delivery is a JSON body like `{"event": "message.inbound", "data": {"text": "…", "channel": "sms", "trust_level": "low", "has_pin": true}, "timestamp": 1761264000.0}` with an `X-Signature` header (hex HMAC-SHA256 of the body, keyed with the secret) and, if you set `auth_header`, an `Authorization` header with that value.
+
+Forwarding is protected:
+
+- Registering needs the user's PIN if they have one, and changing or removing the PIN needs the current PIN, so it can't be removed first to get around this. Wrong PINs count toward the usual lockouts (3 per 5 minutes, 10 a day).
+- Before forwarding starts, AI Text-a-roo texts the user where their texts will go: the host only (never the full URL), and which host it replaces. If that text can't be sent, nothing changes.
+- The user can text `UNHOOK` to their AI Text-a-roo number anytime to stop forwarding. AI Text-a-roo handles it first, so it never reaches an agent or a contact.
+- Only public HTTPS URLs with plain-ASCII host names are accepted, and at most 5 webhook changes an hour and 10 a day.
+
+Remove it with `DELETE /v1/webhook` or `remove_webhook`; the user is texted that forwarding is off.

@@ -145,7 +145,19 @@ class TestCommands:
                 capsys,
             )
         assert out["has_auth_header"] is True
-        client.set_webhook.assert_awaited_once_with("https://hook.example", auth_header="Bearer t")
+        client.set_webhook.assert_awaited_once_with(
+            "https://hook.example", auth_header="Bearer t", pin=None
+        )
+
+    def test_webhook_set_reads_the_pin_from_stdin(self, capsys, monkeypatch) -> None:
+        monkeypatch.setattr("sys.stdin", io.StringIO("4821\n"))
+        client = self._client()
+        client.set_webhook.return_value = {"status": "registered", "owner_notified": True}
+        with patch.object(agent_cli, "TextarooClient", return_value=client):
+            _run_cli(["--api-key", "k", "webhook", "set", "https://hook.example", "--pin"], capsys)
+        client.set_webhook.assert_awaited_once_with(
+            "https://hook.example", auth_header=None, pin="4821"
+        )
 
     def test_api_error_exits_nonzero(self, capsys) -> None:
         from aitextaroo.client import TextarooError
@@ -197,7 +209,25 @@ class TestCommands:
         with patch.object(agent_cli, "TextarooClient", return_value=client):
             out = _run_cli(["--api-key", "k", "set-pin"], capsys)
         assert out == {"status": "pin_set"}
-        client.set_pin.assert_awaited_once_with("482193")
+        client.set_pin.assert_awaited_once_with("482193", current_pin=None)
+
+    def test_changing_the_pin_reads_the_current_one_first(self, capsys, monkeypatch) -> None:
+        monkeypatch.setattr("sys.stdin", io.StringIO("1111\n4821\n"))
+        client = self._client()
+        client.set_pin.return_value = {"status": "pin_changed"}
+        with patch.object(agent_cli, "TextarooClient", return_value=client):
+            out = _run_cli(["--api-key", "k", "set-pin", "--current"], capsys)
+        assert out == {"status": "pin_changed"}
+        client.set_pin.assert_awaited_once_with("4821", current_pin="1111")
+
+    def test_remove_pin_reads_the_current_pin(self, capsys, monkeypatch) -> None:
+        monkeypatch.setattr("sys.stdin", io.StringIO("1111\n"))
+        client = self._client()
+        client.remove_pin.return_value = {"status": "pin_removed"}
+        with patch.object(agent_cli, "TextarooClient", return_value=client):
+            out = _run_cli(["--api-key", "k", "remove-pin"], capsys)
+        assert out == {"status": "pin_removed"}
+        client.remove_pin.assert_awaited_once_with("1111")
 
     def test_pin_prompt_is_hidden_at_a_terminal(self, capsys, monkeypatch) -> None:
         tty = io.StringIO()

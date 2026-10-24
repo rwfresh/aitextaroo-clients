@@ -50,7 +50,9 @@ https://api.aitextaroo.com/mcp
    permissions, where `aitextaroo` and `aitextaroo-bridge` find it in later
    sessions. Without `--save`, store the printed key yourself (for example as
    `AITEXTAROO_API_KEY`); it can't be retrieved again. Confirming a code for a
-   phone that already has an account issues a new key, and the old key stops working.
+   phone that already has an account issues a new key: the old key stops working,
+   every app connected before (including OAuth connectors like Grok or Claude) is
+   signed out, and forwarding to a webhook is turned off. Tell the user first.
 
 4. Tell the user their AI's number (`assigned_number`) and suggest saving it as a
    contact such as "My AI". Then send a test text:
@@ -102,22 +104,47 @@ nohup aitextaroo-bridge > ~/aitextaroo.log 2>&1 &
 
 ## D. Agents with an inbound webhook URL (for example, Grok Bot webhook routines)
 
+The user's texts reach an agent only while it's waiting for a reply, or through a
+webhook or the bridge (a pending wait still gets a text first). Agents that run only
+on demand, like a Grok Bot routine, need a webhook so the user can text them anytime.
+With the MCP server, call `set_webhook`. With a shell:
+
 ```bash
 aitextaroo webhook set https://example.com/hook --auth-header "Bearer <receiver token>"
 ```
 
-Each text the user sends is POSTed as JSON
+If the user has a PIN (`aitextaroo account` shows `has_pin`), add `--pin`: it reads
+the PIN from stdin or a hidden prompt. Each text the user sends is POSTed as JSON
 (`{"event": "message.inbound", "data": {"text": …, "channel": "sms", "trust_level": "low", "has_pin": …}, "timestamp": …}`)
 with an `X-Signature` header (hex HMAC-SHA256 of the body, keyed with the secret
 returned at registration) and, if set, the `Authorization` header.
+
+Forwarding is protected: the PIN is required if the user has one, AI Text-a-roo
+texts the user the destination host before forwarding starts (if that text can't
+be sent, nothing changes), the user can text `UNHOOK` anytime to stop it, and
+webhook changes are limited to 5 an hour. `aitextaroo webhook remove` (or the
+`remove_webhook` tool) stops forwarding and texts the user.
 
 ## Good texts
 
 Plain text, short, and say what reply you need. Before sensitive actions, ask
 the user to text their PIN and check it (`aitextaroo verify-pin`, which reads
 the PIN from stdin and exits 2 when it's wrong, or the `verify_pin` MCP tool).
-No PIN yet? Ask the user to pick 4–8 digits and run `aitextaroo set-pin`. The
-PIN is the only secret to ask for by text: never ask for passwords or card numbers.
+No PIN yet? Ask the user to pick 4–8 digits and run `aitextaroo set-pin` (or the
+`set_pin` MCP tool); never choose it for them. Changing or removing a PIN needs the
+current one (`set-pin --current`, `remove-pin`), and the user is texted before any
+change. The PIN is the only secret to ask for by text: never ask for passwords or
+card numbers.
+
+## When the user wants to text you anytime
+
+Follow the "When the user wants to text you anytime" section of the
+[Agent Skill](skills/aitextaroo/SKILL.md) (or the MCP `get_help` topic
+`text_anytime`). In short: agents with webhook routines (Grok Bot) register the
+routine with `set_webhook`; agents on the user's computer run the bridge as a
+background service ([setup reference](skills/aitextaroo/references/setup.md),
+section C); chat-only assistants say honestly that they can't receive surprise
+texts yet. Use plain words with the user and finish with a live test text.
 
 ## Plans and limits
 
