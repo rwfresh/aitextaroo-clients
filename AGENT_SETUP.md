@@ -66,7 +66,7 @@ aitextaroo send "Build finished: 318 tests passing."
 aitextaroo ask "Deploy to production? Reply YES or NO" --timeout 120   # text, then wait for the answer
 aitextaroo recent                                                       # texts from the last 5 minutes
 aitextaroo relay --to +12125550100 --name Mom "Happy birthday!"        # Pro
-aitextaroo verify-pin <<< 4821    # PIN on stdin stays out of shell history
+aitextaroo verify-pin <<< 4821    # PIN on stdin, not as an argument; exits 2 if wrong
 aitextaroo account
 aitextaroo connect          # how to add the MCP server to Claude Code, Codex, Gemini CLI, Cursor…
 ```

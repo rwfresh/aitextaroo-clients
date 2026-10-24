@@ -18,8 +18,8 @@ Results are JSON on stdout (except `connect`, which prints instructions);
 errors go to stderr with exit code 1. `verify-pin` prints its result and exits
 with code 2 when the PIN is wrong, so `aitextaroo verify-pin <<< 4821 && ...` only
 proceeds on a match. `verify-pin` and `set-pin` read the PIN from stdin when
-it isn't given as an argument, which keeps it out of shell history and the
-process list. The API key comes from --api-key, AITEXTAROO_API_KEY, or
+it isn't given as an argument; at a terminal they ask for it without echoing.
+The API key comes from --api-key, AITEXTAROO_API_KEY, or
 ~/.aitextaroo/credentials.json (aitextaroo-setup --save).
 """
 
