@@ -76,11 +76,65 @@ class TestParseJsonResponse:
         assert exc_info.value.code == "invalid_response"
 
     def test_400_without_error_key(self) -> None:
-        resp = self._make_response(400, '{"detail": "something wrong"}')
+        resp = self._make_response(400, '{"message": "something wrong"}')
         with pytest.raises(TextarooError) as exc_info:
             _parse_json_response(resp, "Fallback msg")
         assert exc_info.value.code == "unknown"
         assert exc_info.value.message == "Fallback msg"
+
+    def test_string_detail_is_the_message(self) -> None:
+        """FastAPI HTTPException: {"detail": "..."}."""
+        resp = self._make_response(409, '{"detail": "Already subscribed to Pro"}')
+        with pytest.raises(TextarooError) as exc_info:
+            _parse_json_response(resp, "Fallback")
+        assert exc_info.value.code == "http_409"
+        assert exc_info.value.message == "Already subscribed to Pro"
+        assert exc_info.value.status_code == 409
+
+    def test_422_validation_error_reports_first_problem(self) -> None:
+        body = (
+            '{"detail": ['
+            '{"type": "missing", "loc": ["body", "phone"], "msg": "Field required", "input": {}},'
+            '{"type": "missing", "loc": ["body", "code"], "msg": "Field required", "input": {}}'
+            "]}"
+        )
+        resp = self._make_response(422, body)
+        with pytest.raises(TextarooError) as exc_info:
+            _parse_json_response(resp, "Fallback")
+        assert exc_info.value.code == "validation_error"
+        assert exc_info.value.message == "phone: Field required"
+        assert exc_info.value.status_code == 422
+
+    @pytest.mark.parametrize(
+        ("loc", "message"),
+        [
+            ('["body", "contacts", 0, "to"]', "contacts.0.to: Bad number"),
+            ('["query", "after_id"]', "after_id: Bad number"),
+            ('["body"]', "Bad number"),
+            ("null", "Bad number"),
+        ],
+    )
+    def test_422_field_name_comes_from_loc(self, loc: str, message: str) -> None:
+        resp = self._make_response(422, f'{{"detail": [{{"loc": {loc}, "msg": "Bad number"}}]}}')
+        with pytest.raises(TextarooError) as exc_info:
+            _parse_json_response(resp, "Fallback")
+        assert exc_info.value.code == "validation_error"
+        assert exc_info.value.message == message
+
+    def test_422_without_msg_uses_fallback(self) -> None:
+        resp = self._make_response(422, '{"detail": [{"loc": ["body", "phone"]}]}')
+        with pytest.raises(TextarooError) as exc_info:
+            _parse_json_response(resp, "Fallback")
+        assert exc_info.value.code == "validation_error"
+        assert exc_info.value.message == "Fallback"
+
+    @pytest.mark.parametrize("detail", ['""', "[]", '["oops"]', "42", "null"])
+    def test_unusable_detail_uses_fallback(self, detail: str) -> None:
+        resp = self._make_response(400, f'{{"detail": {detail}}}')
+        with pytest.raises(TextarooError) as exc_info:
+            _parse_json_response(resp, "Fallback")
+        assert exc_info.value.code == "unknown"
+        assert exc_info.value.message == "Fallback"
 
     def test_429_rate_limited(self) -> None:
         resp = self._make_response(429, '{"error": {"code": "rate_limited", "message": "Too many requests"}}')

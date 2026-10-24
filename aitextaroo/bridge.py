@@ -14,6 +14,7 @@ This module is orchestration — it delegates to:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -113,7 +114,8 @@ class Bridge:
         # Call the agent
         try:
             response = await self._agent.ask(prompt)
-        except TimeoutError:
+        # Before Python 3.11, asyncio.TimeoutError isn't the built-in TimeoutError.
+        except (TimeoutError, asyncio.TimeoutError):
             logger.error("Agent timed out on message %s", message_id)
             await self._send("Sorry, I took too long to respond. Try again?")
             return

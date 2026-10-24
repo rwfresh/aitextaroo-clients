@@ -1,5 +1,6 @@
 """Tests for the bridge orchestration."""
 
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
@@ -44,6 +45,20 @@ class TimeoutAgent(Agent):
 
     async def ask(self, text: str) -> str:
         raise TimeoutError("Agent too slow")
+
+
+class RaisingAgent(Agent):
+    """Agent that always raises the given exception."""
+
+    def __init__(self, error: Exception) -> None:
+        self._error = error
+
+    @property
+    def name(self) -> str:
+        return "RaisingAgent"
+
+    async def ask(self, text: str) -> str:
+        raise self._error
 
 
 class ErrorAgent(Agent):
@@ -209,6 +224,31 @@ class TestBridgeConversation:
 
         sent_text = client.send.call_args[0][0]
         assert "too long" in sent_text.lower()
+
+    @pytest.mark.asyncio
+    async def test_asyncio_timeout_sends_apology(self, monkeypatch) -> None:
+        # CliAgent raises asyncio.TimeoutError. On Python 3.10 that's a class of
+        # its own, not the built-in TimeoutError; recreate that here.
+        class Py310AsyncioTimeoutError(Exception):
+            pass
+
+        monkeypatch.setattr(asyncio, "TimeoutError", Py310AsyncioTimeoutError)
+        client = AsyncMock(spec=TextarooClient)
+        bridge = Bridge(client=client, agent=RaisingAgent(Py310AsyncioTimeoutError()))
+
+        await bridge._handle(_make_message("hi"))
+
+        assert "too long" in client.send.call_args[0][0].lower()
+        assert bridge._conversation.is_empty
+
+    @pytest.mark.asyncio
+    async def test_real_asyncio_timeout_sends_apology(self) -> None:
+        client = AsyncMock(spec=TextarooClient)
+        bridge = Bridge(client=client, agent=RaisingAgent(asyncio.TimeoutError()))
+
+        await bridge._handle(_make_message("hi"))
+
+        assert "too long" in client.send.call_args[0][0].lower()
 
     @pytest.mark.asyncio
     async def test_error_sends_apology(self) -> None:

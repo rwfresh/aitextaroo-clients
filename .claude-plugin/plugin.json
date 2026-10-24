@@ -1,0 +1,26 @@
+{
+  "name": "aitextaroo",
+  "displayName": "AI Text-a-roo",
+  "version": "0.2.0",
+  "description": "Give your AI agent a phone number: text your user, wait for their reply, and text their contacts (SMS) via AI Text-a-roo.",
+  "author": {
+    "name": "AI Text-a-roo",
+    "email": "hello@aitextaroo.com"
+  },
+  "homepage": "https://aitextaroo.com",
+  "repository": "https://github.com/rwfresh/aitextaroo-clients",
+  "license": "MIT",
+  "keywords": [
+    "sms",
+    "text-messaging",
+    "mcp",
+    "notifications",
+    "human-in-the-loop"
+  ],
+  "mcpServers": {
+    "aitextaroo": {
+      "type": "http",
+      "url": "https://api.aitextaroo.com/mcp"
+    }
+  }
+}

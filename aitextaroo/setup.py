@@ -14,8 +14,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+from typing import TYPE_CHECKING
 
 from aitextaroo.client import TextarooClient, TextarooError
+from aitextaroo.credentials import CREDENTIALS_PATH, save_credentials
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def main() -> None:
@@ -24,13 +29,13 @@ def main() -> None:
 
     if args.phone and args.code:
         # Non-interactive: both phone and code provided (agent use)
-        asyncio.run(_confirm(args.phone, args.code, args.base_url))
+        asyncio.run(_confirm(args.phone, args.code, args.base_url, save=args.save))
     elif args.phone:
         # Semi-interactive: phone provided, need code
         asyncio.run(_verify(args.phone, args.base_url))
     else:
         # Fully interactive
-        _interactive_setup(args.base_url)
+        _interactive_setup(args.base_url, save=args.save)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -51,10 +56,18 @@ def _parse_args() -> argparse.Namespace:
         default="https://api.aitextaroo.com",
         help="API base URL (default: https://api.aitextaroo.com)",
     )
+    parser.add_argument(
+        "--save",
+        action="store_true",
+        help=(
+            f"Save the API key to {CREDENTIALS_PATH} (owner-only) so aitextaroo "
+            "and aitextaroo-bridge find it later"
+        ),
+    )
     return parser.parse_args()
 
 
-def _interactive_setup(base_url: str) -> None:
+def _interactive_setup(base_url: str, save: bool = False) -> None:
     """Fully interactive setup — prompts for phone and code."""
     print("AI Text-a-roo Setup")
     print("=" * 40)
@@ -71,7 +84,7 @@ def _interactive_setup(base_url: str) -> None:
     if not code:
         _exit_error("Verification code is required.")
 
-    asyncio.run(_confirm(phone, code, base_url))
+    asyncio.run(_confirm(phone, code, base_url, save=save))
 
 
 async def _verify(phone: str, base_url: str) -> None:
@@ -85,8 +98,8 @@ async def _verify(phone: str, base_url: str) -> None:
         _exit_error(f"Verification failed: {e.message}")
 
 
-async def _confirm(phone: str, code: str, base_url: str) -> None:
-    """Confirm the code and display credentials."""
+async def _confirm(phone: str, code: str, base_url: str, save: bool = False) -> None:
+    """Confirm the code, display credentials, and optionally save the key."""
     try:
         result = await TextarooClient.confirm_verification(
             phone=phone, code=code, base_url=base_url,
@@ -98,6 +111,10 @@ async def _confirm(phone: str, code: str, base_url: str) -> None:
     assigned = result.get("assigned_number", "unknown")
     tier = result.get("tier", "free")
 
+    # Save first: if it fails (say HOME isn't writable), fall back to showing
+    # the key in full exactly as without --save, so it isn't lost.
+    saved_to = _save(api_key, assigned) if save else None
+
     # Human-readable output
     print()
     print("=" * 40)
@@ -106,25 +123,59 @@ async def _confirm(phone: str, code: str, base_url: str) -> None:
     print()
     print(f"  Assigned number: {assigned}")
     print(f"  Tier:            {tier}")
-    print(f"  API Key:         {api_key}")
+    # Once saved, the full key doesn't need to sit in the terminal or a log.
+    print(f"  API Key:         {_mask(api_key) if saved_to else api_key}")
     print()
-    print("  IMPORTANT: Save this API key now. It cannot be retrieved again.")
+    if saved_to:
+        print(f"  Saved to {saved_to} (owner-only).")
+        print("  aitextaroo and aitextaroo-bridge read it automatically.")
+    else:
+        print("  IMPORTANT: Save this API key now. It cannot be retrieved again.")
+        print("  (Re-run with --save to store it in ~/.aitextaroo/credentials.json.)")
     print()
-    print("To start the bridge:")
+    print("Next:")
     print()
-    print(f"  aitextaroo-bridge --api-key {api_key}")
+    print('  aitextaroo send "Hello from your AI!"     # text your phone')
+    print("  aitextaroo connect                        # add the MCP server to your agent")
+    bridge_cmd = "aitextaroo-bridge" if saved_to else f"aitextaroo-bridge --api-key {api_key}"
+    print(f"  {bridge_cmd}   # answer texts with a local CLI agent")
+    print()
+    print(f"Save {assigned} as a contact (for example, \"My AI\") and text it anytime.")
     print()
 
     # Machine-readable block for AI agents to parse and persist
     print("--- AGENT PERSISTENCE BLOCK ---")
-    print(f"AITEXTAROO_API_KEY={api_key}")
+    if saved_to:
+        print(f"AITEXTAROO_API_KEY_SAVED_TO={saved_to}")
+    else:
+        print(f"AITEXTAROO_API_KEY={api_key}")
     print(f"AITEXTAROO_ASSIGNED_NUMBER={assigned}")
     print(f"AITEXTAROO_USER_PHONE={phone}")
     print(f"AITEXTAROO_TIER={tier}")
-    print(f"AITEXTAROO_BRIDGE_CMD=aitextaroo-bridge --api-key {api_key}")
+    print(f"AITEXTAROO_BRIDGE_CMD={bridge_cmd}")
     print("--- END AGENT PERSISTENCE BLOCK ---")
-    print()
-    print("AI agents: save the values above to your memory or config.")
+    if not saved_to:
+        print()
+        print("If you are an agent setting this up for a user, store the key securely")
+        print("for later sessions, or re-run setup with --save so the tools find it.")
+
+
+def _save(api_key: str, assigned: str) -> Path | None:
+    """Save the key to the credentials file; warn and return None on failure."""
+    try:
+        return save_credentials(api_key, assigned)
+    except OSError as exc:
+        print(
+            f"Warning: could not save the API key to {CREDENTIALS_PATH}: {exc}\n"
+            "Store the key printed below yourself; it cannot be retrieved again.",
+            file=sys.stderr,
+        )
+        return None
+
+
+def _mask(api_key: str) -> str:
+    """Show just enough of a key to recognize it: the first 6 characters."""
+    return f"{api_key[:6]}…"
 
 
 def _exit_error(message: str) -> None:

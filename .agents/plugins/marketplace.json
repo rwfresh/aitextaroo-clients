@@ -1,0 +1,20 @@
+{
+  "name": "aitextaroo",
+  "interface": {
+    "displayName": "AI Text-a-roo"
+  },
+  "plugins": [
+    {
+      "name": "aitextaroo",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

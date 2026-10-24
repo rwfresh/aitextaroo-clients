@@ -1,86 +1,126 @@
-# AI Text-a-roo — Agent Setup Guide
+# AI Text-a-roo: setup guide for AI agents
 
-IMPORTANT: You are an AI agent. Your user asked you to set up SMS texting.
-DO NOT just show these instructions to your user. EXECUTE them yourself,
-step by step. You will need to ask your user two questions during setup
-(their phone number and a verification code). Everything else you do yourself.
+AI Text-a-roo is an SMS gateway for AI agents. It gives an agent its own phone
+number: the user texts it from any phone (no app), and the agent can text the
+user back, or first. Message content is never stored.
 
-## Step 1 — Install
+Setup needs two things from the user: their US or Canadian mobile number, and
+the 6-digit code that AI Text-a-roo texts to it. The agent can do the rest.
+Pick the path that matches the environment.
 
-Run this command now:
+- Agent Skill: [`skills/aitextaroo/SKILL.md`](skills/aitextaroo/SKILL.md) (also at https://aitextaroo.com/skills/aitextaroo/SKILL.md)
+- Overview for agents: https://aitextaroo.com/llms.txt
+- Plain-text version of this guide: https://api.aitextaroo.com/v1/agent-setup
+
+## A. Apps with connector settings (Claude, Claude Duet, ChatGPT, Grok Bot)
+
+Add the remote MCP server as a custom connector and sign in with the user's
+phone (OAuth). No API key is needed.
+
+```
+https://api.aitextaroo.com/mcp
+```
+
+- Claude / Claude Duet: Customize → Connectors → Add custom connector.
+- ChatGPT: Plugins → + → Add custom MCP server → OAuth → Create as a plugin.
+  On ChatGPT Pro, custom MCP servers are limited to read-only tools.
+- Grok Bot: "Add a custom MCP server called AI Text-a-roo at https://api.aitextaroo.com/mcp".
+
+## B. Agents that can run commands
+
+1. Install the package (pipx keeps it isolated; it also handles PEP 668 on modern Linux):
+
+   ```bash
+   pipx install aitextaroo        # or: pip install --user aitextaroo
+   ```
+
+2. Ask the user for their mobile number in international format (for example +12125551234), then request a code:
+
+   ```bash
+   aitextaroo-setup --phone +12125551234
+   ```
+
+3. Ask the user for the 6-digit code they received (valid for 5 minutes), then confirm it and save the key:
+
+   ```bash
+   aitextaroo-setup --phone +12125551234 --code 123456 --save
+   ```
+
+   `--save` stores the API key in `~/.aitextaroo/credentials.json` with owner-only
+   permissions, where `aitextaroo` and `aitextaroo-bridge` find it in later
+   sessions. Without `--save`, store the printed key yourself (for example as
+   `AITEXTAROO_API_KEY`); it can't be retrieved again. Confirming a code for a
+   phone that already has an account issues a new key, and the old key stops working.
+
+4. Tell the user their AI's number (`assigned_number`) and suggest saving it as a
+   contact such as "My AI". Then send a test text:
+
+   ```bash
+   aitextaroo send "Hi! Save this number as My AI and text me anytime."
+   ```
+
+Everyday commands (JSON output):
 
 ```bash
-pip install aitextaroo
+aitextaroo send "Build finished: 318 tests passing."
+aitextaroo ask "Deploy to production? Reply YES or NO" --timeout 120   # text, then wait for the answer
+aitextaroo recent                                                       # texts from the last 5 minutes
+aitextaroo relay --to +12125550100 --name Mom "Happy birthday!"        # Pro
+aitextaroo verify-pin <<< 4821    # PIN on stdin stays out of shell history
+aitextaroo account
+aitextaroo connect          # how to add the MCP server to Claude Code, Codex, Gemini CLI, Cursor…
 ```
 
-## Step 2 — Ask for their phone number
+No package install possible? The Agent Skill includes `scripts/textaroo.py`,
+which needs only Python 3, and the REST API works with any HTTP client (see
+[`skills/aitextaroo/references/api.md`](skills/aitextaroo/references/api.md)).
 
-Ask your user: "What's your phone number? I need it in international
-format, like +12125551234."
+## C. Local CLI agents that should answer texts
 
-Then run:
+The bridge keeps one outbound connection to AI Text-a-roo, turns each text the
+user sends into a prompt for a local CLI agent, and texts back the answer. No
+public IP or webhook is needed.
 
 ```bash
-aitextaroo-setup --phone THEIR_PHONE_NUMBER
+nohup aitextaroo-bridge > ~/aitextaroo.log 2>&1 &
 ```
 
-## Step 3 — Ask for the verification code
+- Supported agents: Claude Code, Codex, Hermes, OpenClaw, Grok, Gemini CLI,
+  Antigravity CLI, Goose and Cursor CLI
+  (`--agent claude|codex|hermes|openclaw|grok|gemini|antigravity|goose|cursor`;
+  default: the first one installed; Cursor only when chosen with `--agent cursor`).
+- NanoClaw, or any CLI that takes the prompt as its last argument and prints
+  the reply: `--agent-command "pnpm --silent --dir ~/nanoclaw run chat"`.
+- History is kept locally in `~/.aitextaroo/sessions/`.
+- SMS commands for the user: `/help`, `/new` (fresh conversation), `/status`.
+- Check it's running: `pgrep -f aitextaroo-bridge`. Logs: `tail -20 ~/aitextaroo.log`.
+- One stream per API key: a second bridge disconnects the first.
+- The bridge runs the agent with its own permissions. Some CLIs (for example
+  `hermes -z`) auto-approve tool calls in one-shot mode, and a text can't prove
+  who sent it, so the bridge tells the agent to ask for the user's PIN before
+  anything sensitive.
 
-Tell your user: "I just sent a 6-digit verification code to your phone.
-What's the code?"
-
-Then run:
+## D. Agents with an inbound webhook URL (for example, Grok Bot webhook routines)
 
 ```bash
-aitextaroo-setup --phone THEIR_PHONE_NUMBER --code THE_CODE
+aitextaroo webhook set https://example.com/hook --auth-header "Bearer <receiver token>"
 ```
 
-The output includes an API key, assigned number, and an
-AGENT PERSISTENCE BLOCK with key=value pairs. Save ALL of these
-values to your memory/config for future sessions. The API key
-cannot be retrieved again.
+Each text the user sends is POSTed as JSON
+(`{"event": "message.inbound", "data": {"text": …, "channel": "sms", "trust_level": "low", "has_pin": …}, "timestamp": …}`)
+with an `X-Signature` header (hex HMAC-SHA256 of the body, keyed with the secret
+returned at registration) and, if set, the `Authorization` header.
 
-## Step 4 — Start the bridge
+## Good texts
 
-```bash
-nohup aitextaroo-bridge --api-key THE_KEY > ~/aitextaroo.log 2>&1 &
-```
+Plain text, short, and say what reply you need. Before sensitive actions, ask
+the user to text their PIN and check it (`aitextaroo verify-pin`, which reads
+the PIN from stdin and exits 2 when it's wrong, or the `verify_pin` MCP tool).
+No PIN yet? Ask the user to pick 4–8 digits and run `aitextaroo set-pin`. The
+PIN is the only secret to ask for by text: never ask for passwords or card numbers.
 
-## Step 5 — Confirm to your user
+## Plans and limits
 
-Tell your user: "You're all set! Text [ASSIGNED_NUMBER] to reach me."
-
-## Managing the bridge (future sessions)
-
-```bash
-# Check if running
-pgrep -f aitextaroo-bridge
-
-# Stop
-pkill -f aitextaroo-bridge
-
-# Restart
-nohup aitextaroo-bridge --api-key THE_KEY > ~/aitextaroo.log 2>&1 &
-
-# Check logs
-tail -20 ~/aitextaroo.log
-```
-
-## SMS commands (tell your user)
-
-| Command   | What it does                          |
-|-----------|---------------------------------------|
-| `/help`   | List available commands               |
-| `/new`    | Start a fresh conversation            |
-| `/status` | Show agent name, uptime, message count|
-
-## Quick reference
-
-```
-Install:     pip install aitextaroo
-Setup:       aitextaroo-setup --phone PHONE
-Confirm:     aitextaroo-setup --phone PHONE --code CODE
-Run:         aitextaroo-bridge --api-key KEY
-Env var:     AITEXTAROO_API_KEY
-Source:      https://github.com/rwfresh/aitextaroo-clients
-```
+- Free: 10 messages a day. Pro: $5/month (14-day free trial), 200 a day, plus
+  texting the user's contacts with replies forwarded to the user.
+- Up to 5 texts per minute. Limits reset at midnight UTC.

@@ -1,8 +1,11 @@
 """Core client for the AI Text-a-roo SMS gateway.
 
-Provides two main capabilities:
-1. listen() — SSE stream for real-time inbound SMS delivery
-2. send()   — POST outbound SMS to the user's phone
+Provides:
+1. listen()          — SSE stream for real-time inbound SMS delivery
+2. send()            — POST outbound SMS to the user's phone
+3. wait_for_reply()  — ask a question, then wait for the user's answer
+4. text_contact()    — text someone else on the user's behalf (Pro)
+5. PIN checks, recent messages, webhooks and the Pro upgrade link
 
 The SSE client handles reconnection, Last-Event-ID replay,
 and keepalive parsing automatically. No public IP or webhook
@@ -34,6 +37,12 @@ DEFAULT_RECONNECT_DELAY = 3.0
 MAX_RECONNECT_DELAY = 60.0
 RECONNECT_BACKOFF_FACTOR = 2.0
 
+# Server-side bounds for POST /v1/messages/wait.
+MIN_WAIT_SECONDS = 1
+MAX_WAIT_SECONDS = 120
+# Extra HTTP time on top of the wait so the server answers before we give up.
+WAIT_HTTP_MARGIN = 15.0
+
 
 class TextarooError(Exception):
     """Raised when an API call fails."""
@@ -48,10 +57,13 @@ class TextarooError(Exception):
 def _parse_json_response(response: httpx.Response, fallback_message: str) -> dict:
     """Parse a JSON API response, raising TextarooError on failure.
 
-    Handles three failure modes that response.json() alone does not:
+    Handles four failure modes that response.json() alone does not:
     1. Empty response body (e.g., 502 from a gateway/proxy)
     2. Non-JSON response body (e.g., HTML error page)
     3. API error envelope ({"error": {"code": ..., "message": ...}})
+    4. FastAPI errors: {"detail": "message"} (code "http_<status>") and
+       422 validation errors {"detail": [{"loc": [...], "msg": ...}]}
+       (code "validation_error")
 
     Args:
         response: The httpx Response object.
@@ -74,11 +86,15 @@ def _parse_json_response(response: httpx.Response, fallback_message: str) -> dic
             status_code=response.status_code,
         ) from exc
 
-    # Non-200 with valid JSON — extract the API error envelope
+    # Non-200 with valid JSON — extract the API error envelope. Service
+    # errors use {"error": {...}}; auth failures wrap it as {"detail": {"error": {...}}}.
     if response.status_code != 200:
         error = data.get("error") if isinstance(data, dict) else None
+        detail = data.get("detail") if isinstance(data, dict) else None
+        if not isinstance(error, dict) and isinstance(detail, dict):
+            error = detail.get("error")
         if not isinstance(error, dict):
-            error = {}
+            error = _error_from_detail(detail, response.status_code)
         raise TextarooError(
             code=error.get("code", "unknown"),
             message=error.get("message", fallback_message),
@@ -93,6 +109,35 @@ def _parse_json_response(response: httpx.Response, fallback_message: str) -> dic
         )
 
     return data
+
+
+# Where FastAPI says a request field lives; the first entry of a validation "loc".
+_REQUEST_PARTS = frozenset({"body", "query", "path", "header", "cookie"})
+
+
+def _error_from_detail(detail: Any, status_code: int) -> dict[str, str]:
+    """Turn a FastAPI-style "detail" into an error envelope ({} if unusable).
+
+    {"detail": "Already subscribed to Pro"} keeps the message, with code
+    "http_<status>". A 422 validation error,
+    {"detail": [{"loc": ["body", "phone"], "msg": "Field required"}, ...]},
+    becomes code "validation_error" with the first problem: "phone: Field required".
+    """
+    if isinstance(detail, str) and detail:
+        return {"code": f"http_{status_code}", "message": detail}
+    if not (isinstance(detail, list) and detail and isinstance(detail[0], dict)):
+        return {}
+    first = detail[0]
+    message = first.get("msg")
+    if not isinstance(message, str) or not message:
+        return {"code": "validation_error"}
+    loc = first.get("loc")
+    parts = [str(part) for part in loc] if isinstance(loc, list) else []
+    if parts and parts[0] in _REQUEST_PARTS:
+        parts = parts[1:]
+    if parts:
+        message = f"{'.'.join(parts)}: {message}"
+    return {"code": "validation_error", "message": message}
 
 
 class TextarooClient:
@@ -217,8 +262,33 @@ class TextarooClient:
         Raises:
             TextarooError: If the API returns an error.
         """
+        return await self._post_send({"text": text})
+
+    async def text_contact(self, to: str, text: str, recipient_name: str | None = None) -> str:
+        """Text someone else on the user's behalf (Pro plan).
+
+        The contact sees the AI's number. Their replies are forwarded to
+        the user's phone, labeled with recipient_name when given.
+
+        Args:
+            to: The contact's number in E.164 format (e.g., "+12125550100").
+            text: Message body (max 1600 characters).
+            recipient_name: Optional name used to label forwarded replies.
+
+        Returns:
+            The carrier message ID.
+
+        Raises:
+            TextarooError: If the API returns an error ("tier_required" on Free).
+        """
+        body: dict[str, Any] = {"text": text, "to": to}
+        if recipient_name:
+            body["recipient_name"] = recipient_name
+        return await self._post_send(body)
+
+    async def _post_send(self, body: dict[str, Any]) -> str:
         client = await self._get_client()
-        response = await client.post("/v1/send", json={"text": text})
+        response = await client.post("/v1/send", json=body)
         data = _parse_json_response(response, "Send failed")
         message_id = data.get("message_id")
         if not isinstance(message_id, str) or not message_id:
@@ -228,6 +298,154 @@ class TextarooClient:
                 status_code=response.status_code,
             )
         return message_id
+
+    # ── Replies ─────────────────────────────────────────────────
+
+    async def wait_for_reply(self, timeout_seconds: int = 60) -> InboundMessage | None:
+        """Wait for the user's next text (or one that arrived since your last send).
+
+        Use it after asking a question: send(...), then wait_for_reply().
+        A pending wait gets the user's next text before the SSE stream or
+        a webhook does, so the same reply is never handled twice.
+
+        Args:
+            timeout_seconds: How long the server waits, 1–120 seconds.
+
+        Returns:
+            The reply, or None if the user didn't answer in time.
+
+        Raises:
+            TextarooError: If the API returns an error.
+        """
+        timeout = max(MIN_WAIT_SECONDS, min(MAX_WAIT_SECONDS, int(timeout_seconds)))
+        client = await self._get_client()
+        response = await client.post(
+            "/v1/messages/wait",
+            json={"timeout_seconds": timeout},
+            timeout=timeout + WAIT_HTTP_MARGIN,
+        )
+        data = _parse_json_response(response, "Wait for reply failed")
+        message = data.get("message")
+        return _message_from_dict(message) if isinstance(message, dict) else None
+
+    async def recent_messages(self, after_id: str | None = None) -> list[InboundMessage]:
+        """Texts the user sent in the last five minutes, oldest first.
+
+        Args:
+            after_id: Only return texts after this message id (a cursor).
+
+        Returns:
+            The messages still held in memory by the gateway.
+
+        Raises:
+            TextarooError: If the API returns an error.
+        """
+        client = await self._get_client()
+        params = {"after_id": after_id} if after_id else None
+        response = await client.get("/v1/messages/recent", params=params)
+        data = _parse_json_response(response, "Recent messages lookup failed")
+        messages = data.get("messages")
+        if not isinstance(messages, list):
+            return []
+        return [_message_from_dict(m) for m in messages if isinstance(m, dict)]
+
+    # ── Security PIN ────────────────────────────────────────────
+
+    async def verify_pin(self, pin: str) -> dict[str, Any]:
+        """Check a PIN the user texted against their security PIN.
+
+        Ask for the PIN before anything sensitive (purchases, messages to
+        other people, deletions). Don't store or repeat it.
+
+        Returns:
+            {"verified": bool, "attempts_remaining": int | None}
+
+        Raises:
+            TextarooError: "pin_not_set", or "pin_locked" after 3 wrong tries
+                in 5 minutes.
+        """
+        client = await self._get_client()
+        response = await client.post("/v1/verify-pin", json={"pin": pin})
+        return _parse_json_response(response, "PIN verification failed")
+
+    async def set_pin(self, pin: str) -> dict[str, Any]:
+        """Set or change the user's security PIN (4–8 digits).
+
+        Ask the user to choose it; don't store a copy.
+
+        Returns:
+            {"status": "pin_set"}
+
+        Raises:
+            TextarooError: If the PIN isn't 4–8 digits or the API returns an error.
+        """
+        client = await self._get_client()
+        response = await client.post("/v1/account/pin", json={"pin": pin})
+        return _parse_json_response(response, "Setting the PIN failed")
+
+    async def remove_pin(self) -> dict[str, Any]:
+        """Remove the user's security PIN.
+
+        Returns:
+            {"status": "pin_removed"}
+
+        Raises:
+            TextarooError: If the API returns an error.
+        """
+        client = await self._get_client()
+        response = await client.delete("/v1/account/pin")
+        return _parse_json_response(response, "Removing the PIN failed")
+
+    # ── Webhooks ────────────────────────────────────────────────
+
+    async def set_webhook(self, url: str, auth_header: str | None = None) -> dict[str, Any]:
+        """Forward each text the user sends to a URL as a signed JSON POST.
+
+        Args:
+            url: Public https URL that receives the deliveries.
+            auth_header: Optional Authorization header value sent with each
+                delivery (e.g., "Bearer <token>" for a Grok Bot webhook routine).
+
+        Returns:
+            {"status": "registered", "url": ..., "secret": ..., "has_auth_header": bool}.
+            Verify deliveries with the secret: X-Signature is a hex
+            HMAC-SHA256 of the raw body.
+
+        Raises:
+            TextarooError: If the API returns an error.
+        """
+        body: dict[str, Any] = {"url": url}
+        if auth_header:
+            body["auth_header"] = auth_header
+        client = await self._get_client()
+        response = await client.post("/v1/webhook", json=body)
+        return _parse_json_response(response, "Webhook registration failed")
+
+    async def remove_webhook(self) -> dict[str, Any]:
+        """Stop webhook delivery."""
+        client = await self._get_client()
+        response = await client.delete("/v1/webhook")
+        return _parse_json_response(response, "Webhook removal failed")
+
+    # ── Billing ─────────────────────────────────────────────────
+
+    async def upgrade_link(self) -> str:
+        """A Stripe checkout link the user can open to start Pro.
+
+        Raises:
+            TextarooError: If the API returns an error (e.g. already on Pro).
+        """
+        client = await self._get_client()
+        response = await client.post("/v1/billing/checkout")
+        data = _parse_json_response(response, "Upgrade link failed")
+        url = data.get("checkout_url")
+        if not isinstance(url, str) or not url:
+            raise TextarooError(
+                code="invalid_response",
+                message="Missing checkout_url in billing response",
+                status_code=response.status_code,
+            )
+        return url
 
     # ── Account info ────────────────────────────────────────────
 
@@ -389,17 +607,7 @@ def _parse_event(
         )
 
     if event_type == "message":
-        return StreamEvent(
-            type=EventType.MESSAGE,
-            message=InboundMessage(
-                id=data.get("id", ""),
-                text=data.get("text", ""),
-                received_at=data.get("received_at", ""),
-                channel=data.get("channel", "sms"),
-                trust_level=data.get("trust_level", "low"),
-                has_pin=data.get("has_pin", False),
-            ),
-        )
+        return StreamEvent(type=EventType.MESSAGE, message=_message_from_dict(data))
 
     if event_type == "error":
         return StreamEvent(
@@ -413,6 +621,18 @@ def _parse_event(
 
     logger.debug("Unknown event type: %s", event_type)
     return None
+
+
+def _message_from_dict(data: dict) -> InboundMessage:
+    """Build an InboundMessage from the API's message JSON (SSE, wait, recent)."""
+    return InboundMessage(
+        id=data.get("id", ""),
+        text=data.get("text", ""),
+        received_at=data.get("received_at", ""),
+        channel=data.get("channel", "sms"),
+        trust_level=data.get("trust_level", "low"),
+        has_pin=data.get("has_pin", False),
+    )
 
 
 async def _async_sleep(seconds: float) -> None:
