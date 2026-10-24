@@ -72,6 +72,9 @@ def main(argv: list[str] | None = None) -> None:
     else:
         print("Sessions: in-memory only (--no-persist)")
     print("Listening for SMS messages. Ctrl+C to stop.")
+    # Logs go to stderr; without this, a log file or journal shows this banner
+    # after them (stdout is buffered when it isn't a terminal).
+    sys.stdout.flush()
 
     try:
         asyncio.run(bridge.run())
@@ -84,10 +87,7 @@ def main(argv: list[str] | None = None) -> None:
             return
         message = f"{exc.code}: {exc.message}"
         if exc.code == "unauthorized":
-            message += (
-                ". If the key was removed from your account, run aitextaroo-setup --save "
-                "to add a new one."
-            )
+            message += ". Run aitextaroo-setup --save to add a new one."
         _exit_error(message)
 
 
