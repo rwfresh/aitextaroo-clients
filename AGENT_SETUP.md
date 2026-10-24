@@ -100,7 +100,8 @@ nohup aitextaroo-bridge > ~/aitextaroo.log 2>&1 &
 - SMS commands for the user: `/help`, `/new` (fresh conversation), `/status`.
 - Check it's running: `pgrep -f aitextaroo-bridge`. Logs: `tail -20 ~/aitextaroo.log`.
 - One stream per account: a second bridge, even with another key, stops the
-  first. A bridge also stops when its key is removed from the account. Either
+  first. A bridge also stops when its key is removed from the account, or when
+  the API rejects its key (wrong, or removed while the bridge was off). Either
   way it says why and exits cleanly (code 0) instead of reconnecting.
 - The bridge runs the agent with its own permissions. Some CLIs (for example
   `hermes -z`) auto-approve tool calls in one-shot mode, and a text can't prove

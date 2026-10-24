@@ -37,13 +37,15 @@ class TestBridgeStops:
         assert err.startswith("Bridge stopped: Another bridge or app is receiving")
         assert "Stop the other one" in err
 
-    def test_rejected_key_is_an_error(self, capsys) -> None:
-        with pytest.raises(SystemExit) as exc_info:
-            _run_bridge(TextarooError("unauthorized", "Invalid API key", 401))
-        assert exc_info.value.code == 1
-        err = capsys.readouterr().err
-        assert err.startswith("Error: unauthorized: Invalid API key. ")
-        assert "aitextaroo-setup --save" in err
+    def test_rejected_key_exits_cleanly_too(self, capsys) -> None:
+        # A key removed while the bridge was off gets a 401 on the next start.
+        # That never clears up by itself, so restarting every few seconds
+        # would only fill the log.
+        _run_bridge(TextarooError("unauthorized", "Invalid API key", 401))
+        assert capsys.readouterr().err == (
+            "Bridge stopped: this key isn't on your account (wrong, or removed). "
+            "Run aitextaroo-setup --save to add one, then start the bridge again.\n"
+        )
 
     def test_other_api_errors_exit_nonzero(self, capsys) -> None:
         with pytest.raises(SystemExit) as exc_info:

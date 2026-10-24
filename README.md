@@ -107,8 +107,8 @@ history. Responses are stripped of markdown for SMS.
 An account has one stream at a time: starting a second bridge, even with another key, stops
 the first. A bridge also stops when its key is removed from the account. Either way it says
 why and exits with code 0 instead of reconnecting, so a service set to restart on failure
-leaves it stopped ([setup guide](skills/aitextaroo/references/setup.md), section C). A
-rejected key (401) exits with code 1.
+leaves it stopped ([setup guide](skills/aitextaroo/references/setup.md), section C). So
+does a key the API rejects (wrong, or removed while the bridge was off).
 
 ```text
 aitextaroo-bridge [OPTIONS]

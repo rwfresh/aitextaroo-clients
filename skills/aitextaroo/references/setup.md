@@ -55,11 +55,11 @@ nohup aitextaroo-bridge > ~/aitextaroo.log 2>&1 &
 - Conversation history is saved locally in `~/.aitextaroo/sessions/`.
 - The user can text `/help`, `/new` (start a fresh conversation) and `/status`.
 - Check it's running with `pgrep -f aitextaroo-bridge`; read logs with `tail -20 ~/aitextaroo.log`.
-- Only one stream per account: starting a second bridge, even with another key, stops the first one. A bridge also stops when its key is removed from the account (it says to run `aitextaroo-setup --save` for a new one). Either way it exits cleanly instead of reconnecting, so two bridges never take turns kicking each other off.
+- Only one stream per account: starting a second bridge, even with another key, stops the first one. A bridge also stops when its key is removed from the account, or when the API rejects its key (wrong, or removed while the bridge was off); it says to run `aitextaroo-setup --save` for a new one. Either way it exits cleanly instead of reconnecting, so two bridges never take turns kicking each other off.
 
 ### Keep it running after a restart
 
-`nohup` stops when the computer restarts. To have the bridge start on its own, run it as a background service. Replace `claude` with your agent (the `--agent` value above). Both snippets record the bridge's full path and the current `PATH` when you run them, so the service can find your agent's command; run them from a shell where `claude` (or your agent) works. Each starts by checking the bridge is installed, and stops if it isn't (run `pipx ensurepath` and open a new shell, then try again). The service restarts the bridge if it fails, but not after a clean stop (its key was removed, or another bridge took over); once that's sorted, start it again with the restart command below.
+`nohup` stops when the computer restarts. To have the bridge start on its own, run it as a background service. Replace `claude` with your agent (the `--agent` value above). Both snippets record the bridge's full path and the current `PATH` when you run them, so the service can find your agent's command; run them from a shell where `claude` (or your agent) works. Each starts by checking the bridge is installed, and stops if it isn't (run `pipx ensurepath` and open a new shell, then try again). The service restarts the bridge if it fails, but not after a clean stop (its key was removed or rejected, or another bridge took over); once that's sorted, start it again with the restart command below.
 
 Linux (systemd user service):
 

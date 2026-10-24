@@ -7,10 +7,11 @@ Usage:
     AITEXTAROO_API_KEY=YOUR_KEY aitextaroo-bridge
 
 The bridge runs until stopped. It also stops, and exits cleanly (code 0), when
-its key is removed from the account or another bridge or app takes over the
-account's texts: restarting can't help then, so a service manager set to
-restart on failure leaves it stopped instead of fighting the other bridge.
-A rejected key (401) is an error (code 1).
+restarting can't help: its key is removed from the account, the API rejects
+its key (wrong, or removed while the bridge was off), or another bridge or
+program starts listening for the account's texts. A service manager set to
+restart on failure then leaves it stopped, instead of fighting the other
+bridge or retrying a dead key every few seconds forever.
 """
 
 from __future__ import annotations
@@ -29,6 +30,14 @@ from aitextaroo.client import STREAM_STOPS, TextarooClient, TextarooError
 from aitextaroo.credentials import load_api_key
 
 DEFAULT_SESSIONS_DIR = Path.home() / ".aitextaroo" / "sessions"
+
+# Why the bridge stopped when the API rejects its key. A 401 is never a
+# passing outage (the API answers 5xx when it can't check a key), so it
+# stops for good like the stream stops in STREAM_STOPS.
+REJECTED_KEY = (
+    "this key isn't on your account (wrong, or removed). "
+    "Run aitextaroo-setup --save to add one, then start the bridge again."
+)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -81,14 +90,12 @@ def main(argv: list[str] | None = None) -> None:
     except KeyboardInterrupt:
         print("\nBridge stopped.")
     except TextarooError as exc:
-        if exc.code in STREAM_STOPS:
+        if exc.code == "unauthorized" or exc.code in STREAM_STOPS:
             # Restarting can't help, so exit 0 (see the module docstring).
-            print(f"Bridge stopped: {exc.message}", file=sys.stderr)
+            reason = REJECTED_KEY if exc.code == "unauthorized" else exc.message
+            print(f"Bridge stopped: {reason}", file=sys.stderr)
             return
-        message = f"{exc.code}: {exc.message}"
-        if exc.code == "unauthorized":
-            message += ". Run aitextaroo-setup --save to add a new one."
-        _exit_error(message)
+        _exit_error(f"{exc.code}: {exc.message}")
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
