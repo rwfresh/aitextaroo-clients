@@ -31,7 +31,8 @@ If the user isn't set up yet, follow [references/setup.md](references/setup.md).
 | Wait for the user's reply | `wait_for_reply` | `wait --timeout 90` |
 | Read texts from the last 5 minutes | `get_recent_messages` | `recent` |
 | Text a contact for the user (Pro) | `text_contact` | `relay --to +1… --name Mom "…"` |
-| Check a PIN the user texted | `verify_pin` | `verify-pin 4821` |
+| Check a PIN the user texted | `verify_pin` | `verify-pin <<< 4821` |
+| Set the user's PIN | | `set-pin <<< 4821` |
 | Plan, usage and number | `get_account` | `account` |
 | Pro upgrade link | `get_upgrade_link` | `upgrade` |
 
@@ -42,7 +43,7 @@ If the user isn't set up yet, follow [references/setup.md](references/setup.md).
 - One question per text. If several decisions are needed, ask the most important first.
 - Text when it's worth an interruption: something time-sensitive, a decision only the user can make, or something they asked to hear about. Batch routine updates into one text.
 - Respect quiet hours in the user's time zone (roughly 9 PM–8 AM) unless they asked or it's urgent.
-- Never text passwords, one-time codes, full card or account numbers, or other secrets, and never ask the user to text them to you.
+- Never text passwords, one-time codes, full card or account numbers, or other secrets, and never ask the user to text them to you. The one exception is the security PIN below.
 
 ## Asking and waiting
 
@@ -50,7 +51,7 @@ To get a decision, send the question with `send_text`, then call `wait_for_reply
 
 ## Security PIN
 
-SMS sender IDs can be spoofed. Before anything sensitive (spending money, sending messages to other people, deleting things, changing settings), ask the user to text their PIN, call `verify_pin`, and continue only if it returns `verified: true`. `aitextaroo verify-pin` and `scripts/textaroo.py verify-pin` exit 2 when the PIN is wrong, so `aitextaroo verify-pin 4821 && …` only continues on a match. Don't store or repeat the PIN. Three wrong attempts lock verification for five minutes. If `get_account` shows `has_pin: false`, suggest the user set one in the dashboard at aitextaroo.com.
+SMS sender IDs can be spoofed. Before anything sensitive (spending money, sending messages to other people, deleting things, changing settings), ask the user to text their PIN, call `verify_pin`, and continue only if it returns `verified: true`. On the command line, pass the PIN on stdin rather than as an argument, so it stays out of shell history and the process list: `aitextaroo verify-pin <<< 4821 && …`. `aitextaroo verify-pin` and `scripts/textaroo.py verify-pin` exit 2 when the PIN is wrong, so the `&&` only continues on a match. Don't store or repeat the PIN. Three wrong attempts lock verification for five minutes. If `get_account` shows `has_pin: false`, offer to set one: ask the user to choose 4–8 digits, then run `set-pin` (PIN on stdin) or call `POST /v1/account/pin` (see [references/api.md](references/api.md)). Don't keep a copy.
 
 ## Texting other people (Pro)
 

@@ -9,11 +9,14 @@ Text your user and read their replies through https://aitextaroo.com.
     textaroo.py wait --timeout 90
     textaroo.py recent [--after-id ID]
     textaroo.py relay --to +12125550100 --name Mom "Happy birthday!"
-    textaroo.py verify-pin 4821
+    textaroo.py verify-pin <<< 4821
+    textaroo.py set-pin <<< 4821
     textaroo.py account
     textaroo.py upgrade
 
 Authenticated commands read the API key from AITEXTAROO_API_KEY (or --api-key).
+`verify-pin` and `set-pin` read the PIN from stdin unless it's given as an
+argument, which keeps it out of shell history and the process list.
 Output is JSON on stdout; errors go to stderr with a non-zero exit code.
 """
 
@@ -90,7 +93,10 @@ def main() -> None:
     p.add_argument("--after-id", help="Only texts after this message id")
 
     p = sub.add_parser("verify-pin", help="Check a PIN the user texted")
-    p.add_argument("pin")
+    p.add_argument("pin", nargs="?", help="The PIN (default: read from stdin)")
+
+    p = sub.add_parser("set-pin", help="Set or change the user's security PIN (4-8 digits)")
+    p.add_argument("pin", nargs="?", help="The PIN (default: read from stdin)")
 
     sub.add_parser("account", help="Plan, usage and assigned number")
     sub.add_parser("upgrade", help="Stripe checkout link for Pro")
@@ -111,6 +117,10 @@ def main() -> None:
                 "(run signup and confirm first)."
             )
         key = args.api_key
+        if args.command in ("verify-pin", "set-pin"):
+            pin = (args.pin if args.pin not in (None, "-") else sys.stdin.readline()).strip()
+            if not pin:
+                sys.exit("No PIN given: pass it on stdin (verify-pin <<< 4821) or as an argument.")
         if args.command == "send":
             result = request("POST", "/send", base_url=base, api_key=key, body={"text": args.text})
         elif args.command == "relay":
@@ -134,9 +144,9 @@ def main() -> None:
             )
             result = request("GET", f"/messages/recent{query}", base_url=base, api_key=key)
         elif args.command == "verify-pin":
-            result = request(
-                "POST", "/verify-pin", base_url=base, api_key=key, body={"pin": args.pin}
-            )
+            result = request("POST", "/verify-pin", base_url=base, api_key=key, body={"pin": pin})
+        elif args.command == "set-pin":
+            result = request("POST", "/account/pin", base_url=base, api_key=key, body={"pin": pin})
         elif args.command == "account":
             result = request("GET", "/account", base_url=base, api_key=key)
         else:  # upgrade

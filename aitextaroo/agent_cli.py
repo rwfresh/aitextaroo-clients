@@ -6,7 +6,8 @@ Usage:
     aitextaroo wait --timeout 60
     aitextaroo recent [--after-id ID]
     aitextaroo relay --to +12125550100 --name Mom "Happy birthday!"
-    aitextaroo verify-pin 4821
+    aitextaroo verify-pin <<< 4821
+    aitextaroo set-pin <<< 4821
     aitextaroo account
     aitextaroo upgrade
     aitextaroo webhook set https://example.com/hook [--auth-header "Bearer ..."]
@@ -15,8 +16,10 @@ Usage:
 
 Results are JSON on stdout (except `connect`, which prints instructions);
 errors go to stderr with exit code 1. `verify-pin` prints its result and exits
-with code 2 when the PIN is wrong, so `aitextaroo verify-pin 4821 && ...` only
-proceeds on a match. The API key comes from --api-key, AITEXTAROO_API_KEY, or
+with code 2 when the PIN is wrong, so `aitextaroo verify-pin <<< 4821 && ...` only
+proceeds on a match. `verify-pin` and `set-pin` read the PIN from stdin when
+it isn't given as an argument, which keeps it out of shell history and the
+process list. The API key comes from --api-key, AITEXTAROO_API_KEY, or
 ~/.aitextaroo/credentials.json (aitextaroo-setup --save).
 """
 
@@ -117,6 +120,8 @@ def main(argv: list[str] | None = None) -> None:
             "No API key. Run `aitextaroo-setup --phone +1... --save`, "
             "set AITEXTAROO_API_KEY, or pass --api-key."
         )
+    if args.command in ("verify-pin", "set-pin"):
+        args.pin = _read_pin(args.pin)
     try:
         result = asyncio.run(_run(args, key))
     except TextarooError as exc:
@@ -152,6 +157,8 @@ async def _run(args: argparse.Namespace, key: str) -> Any:
             return {"message_id": await client.text_contact(args.to, args.text, args.name)}
         if args.command == "verify-pin":
             return await client.verify_pin(args.pin)
+        if args.command == "set-pin":
+            return await client.set_pin(args.pin)
         if args.command == "account":
             return await client.account()
         if args.command == "upgrade":
@@ -209,7 +216,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("text")
 
     p = sub.add_parser("verify-pin", help="Check a PIN the user texted")
-    p.add_argument("pin")
+    p.add_argument("pin", nargs="?", help="The PIN (default: read from stdin)")
+
+    p = sub.add_parser("set-pin", help="Set or change the user's security PIN (4-8 digits)")
+    p.add_argument("pin", nargs="?", help="The PIN (default: read from stdin)")
 
     sub.add_parser("account", help="Plan, usage and the AI's phone number")
     sub.add_parser("upgrade", help="Stripe checkout link for Pro")
@@ -229,6 +239,15 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("client", nargs="?", choices=sorted(CONNECT), help="Which client (default: all)")
 
     return parser.parse_args(argv)
+
+
+def _read_pin(arg: str | None) -> str:
+    """The PIN from the argument, or from the first line of stdin when it's omitted or "-"."""
+    pin = arg if arg not in (None, "-") else sys.stdin.readline()
+    pin = pin.strip()
+    if not pin:
+        _fail("No PIN given. Pass it on stdin (aitextaroo verify-pin <<< 4821) or as an argument.")
+    return pin
 
 
 def _fail(message: str) -> None:

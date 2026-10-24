@@ -45,8 +45,9 @@ aitextaroo send "Hello from my agent!"
 ## The `aitextaroo` command
 
 Made for agents with a shell. Output is JSON; errors go to stderr with exit code 1.
-`aitextaroo verify-pin` exits 2 when the PIN is wrong, so `aitextaroo verify-pin 4821 && …`
-only continues on a match.
+`aitextaroo verify-pin` exits 2 when the PIN is wrong, so `aitextaroo verify-pin <<< 4821 && …`
+only continues on a match. `verify-pin` and `set-pin` read the PIN from stdin when it isn't
+an argument, which keeps it out of shell history and the process list.
 
 ```bash
 aitextaroo send "Build finished: 318 tests passing."
@@ -54,7 +55,8 @@ aitextaroo ask "Deploy to production? Reply YES or NO" --timeout 120   # text, t
 aitextaroo wait --timeout 60                                            # wait for the next text
 aitextaroo recent                                                       # texts from the last 5 minutes
 aitextaroo relay --to +12125550100 --name Mom "Happy birthday!"        # Pro: text a contact
-aitextaroo verify-pin 4821                                              # check a PIN the user texted
+aitextaroo verify-pin <<< 4821                                          # check a PIN the user texted
+aitextaroo set-pin <<< 4821                                             # set the user's PIN (4-8 digits)
 aitextaroo account
 aitextaroo upgrade                                                      # Stripe link for Pro
 aitextaroo webhook set https://example.com/hook --auth-header "Bearer <token>"
@@ -127,6 +129,7 @@ asyncio.run(main())
 | `listen()` | Async iterator over inbound texts via SSE, with automatic reconnect and replay. |
 | `text_contact(to, text, recipient_name=None)` | Pro: text someone else; their replies go to the user's phone. |
 | `verify_pin(pin)` | Check a PIN the user texted: `{"verified": bool, "attempts_remaining": int \| None}`. |
+| `set_pin(pin)` / `remove_pin()` | Set, change or remove the user's security PIN (4–8 digits). |
 | `set_webhook(url, auth_header=None)` / `remove_webhook()` | Forward inbound texts to a URL (signed with `X-Signature`). |
 | `account()` | Plan, assigned number, usage and daily limit. |
 | `upgrade_link()` | Stripe checkout link for Pro. |

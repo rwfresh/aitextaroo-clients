@@ -13,6 +13,7 @@ import argparse
 import asyncio
 import logging
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -45,6 +46,9 @@ def main() -> None:
     try:
         if args.agent_command:
             agent = custom_agent(args.agent_command)
+            # Catch a typo now, not as "something went wrong" on every text.
+            if not shutil.which(agent.command):
+                raise ValueError(f"--agent-command executable not found: {agent.command}")
         else:
             agent = create_agent(_resolve_agent(args.agent))
     except ValueError as exc:

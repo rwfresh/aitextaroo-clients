@@ -146,6 +146,11 @@ class CliAgent(Agent):
     def system_prompt(self) -> str:
         return self._config.system_prompt
 
+    @property
+    def command(self) -> str:
+        """The executable this agent runs."""
+        return self._config.command
+
     async def ask(self, text: str) -> str:
         """Spawn the agent CLI with the prompt and return its output."""
         if self._config.output_flag is None:

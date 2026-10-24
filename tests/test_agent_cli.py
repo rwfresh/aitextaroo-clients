@@ -1,5 +1,6 @@
 """Tests for the `aitextaroo` command and the credentials file."""
 
+import io
 import json
 import stat
 from unittest.mock import AsyncMock, patch
@@ -177,6 +178,38 @@ class TestCommands:
             agent_cli.main(["--api-key", "k", "verify-pin", "1234"])
         assert exc_info.value.code == 2
         assert json.loads(capsys.readouterr().out) == {"verified": False, "attempts_remaining": 2}
+
+    @pytest.mark.parametrize("argv", [["verify-pin"], ["verify-pin", "-"]])
+    def test_verify_pin_reads_stdin(self, argv, capsys, monkeypatch) -> None:
+        # `aitextaroo verify-pin <<< 4821` keeps the PIN out of argv.
+        monkeypatch.setattr("sys.stdin", io.StringIO("4821\n"))
+        client = self._client()
+        client.verify_pin.return_value = {"verified": True, "attempts_remaining": None}
+        with patch.object(agent_cli, "TextarooClient", return_value=client):
+            out = _run_cli(["--api-key", "k", *argv], capsys)
+        assert out["verified"] is True
+        client.verify_pin.assert_awaited_once_with("4821")
+
+    def test_set_pin_reads_stdin(self, capsys, monkeypatch) -> None:
+        monkeypatch.setattr("sys.stdin", io.StringIO("  482193\n"))
+        client = self._client()
+        client.set_pin.return_value = {"status": "pin_set"}
+        with patch.object(agent_cli, "TextarooClient", return_value=client):
+            out = _run_cli(["--api-key", "k", "set-pin"], capsys)
+        assert out == {"status": "pin_set"}
+        client.set_pin.assert_awaited_once_with("482193")
+
+    def test_missing_pin_fails_before_calling_the_api(self, capsys, monkeypatch) -> None:
+        monkeypatch.setattr("sys.stdin", io.StringIO(""))
+        client = self._client()
+        with (
+            patch.object(agent_cli, "TextarooClient", return_value=client),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            agent_cli.main(["--api-key", "k", "verify-pin"])
+        assert exc_info.value.code == 1
+        assert "No PIN given" in capsys.readouterr().err
+        client.verify_pin.assert_not_called()
 
     @pytest.mark.parametrize(
         ("error", "expected"),

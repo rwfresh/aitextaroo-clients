@@ -276,3 +276,13 @@ class TestCursorBinary:
             cli.main()
         assert exc_info.value.code == 1
         assert "not Cursor CLI" in capsys.readouterr().err
+
+
+class TestBridgeAgentCommand:
+    def test_bridge_rejects_a_missing_agent_command(self, capsys, monkeypatch) -> None:
+        argv = ["aitextaroo-bridge", "--api-key", "k", "--agent-command", "no-such-agent-xyz run"]
+        monkeypatch.setattr(sys, "argv", argv)
+        with pytest.raises(SystemExit) as exc_info:
+            cli.main()
+        assert exc_info.value.code == 1
+        assert "executable not found: no-such-agent-xyz" in capsys.readouterr().err

@@ -130,6 +130,21 @@ class TestVerifyPin:
         assert exc_info.value.code == "pin_locked"
         await client.close()
 
+    @pytest.mark.asyncio
+    async def test_set_pin(self) -> None:
+        client, seen = _recording_client(200, '{"status": "pin_set"}')
+        assert await client.set_pin("4821") == {"status": "pin_set"}
+        assert (seen[0].method, seen[0].url.path) == ("POST", "/v1/account/pin")
+        assert json.loads(seen[0].content) == {"pin": "4821"}
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_remove_pin(self) -> None:
+        client, seen = _recording_client(200, '{"status": "pin_removed"}')
+        assert await client.remove_pin() == {"status": "pin_removed"}
+        assert (seen[0].method, seen[0].url.path) == ("DELETE", "/v1/account/pin")
+        await client.close()
+
 
 class TestWebhook:
     @pytest.mark.asyncio

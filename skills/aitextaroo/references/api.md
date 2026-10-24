@@ -28,6 +28,7 @@ Delivery order: a pending `/messages/wait` (or MCP `wait_for_reply`) gets the ne
 | Method | Path | Body | Notes |
 |---|---|---|---|
 | GET | `/account` | | Plan, assigned number, `has_pin`, `messages_today`, `daily_limit`. |
+| POST | `/account/pin` | `{"pin": "4821"}` | Set or change the security PIN (4–8 digits). `DELETE /account/pin` removes it. |
 | POST | `/verify-pin` | `{"pin": "4821"}` | `{"verified": bool, "attempts_remaining": int \| null}`. 3 attempts per 5 minutes. |
 | POST | `/webhook` | `{"url": "https://…", "auth_header": "Bearer …"}` | Forward inbound texts to a URL. `auth_header` is optional. |
 | DELETE | `/webhook` | | Stop webhook delivery. |

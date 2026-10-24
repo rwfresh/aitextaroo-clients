@@ -368,6 +368,34 @@ class TextarooClient:
         response = await client.post("/v1/verify-pin", json={"pin": pin})
         return _parse_json_response(response, "PIN verification failed")
 
+    async def set_pin(self, pin: str) -> dict[str, Any]:
+        """Set or change the user's security PIN (4–8 digits).
+
+        Ask the user to choose it; don't store a copy.
+
+        Returns:
+            {"status": "pin_set"}
+
+        Raises:
+            TextarooError: If the PIN isn't 4–8 digits or the API returns an error.
+        """
+        client = await self._get_client()
+        response = await client.post("/v1/account/pin", json={"pin": pin})
+        return _parse_json_response(response, "Setting the PIN failed")
+
+    async def remove_pin(self) -> dict[str, Any]:
+        """Remove the user's security PIN.
+
+        Returns:
+            {"status": "pin_removed"}
+
+        Raises:
+            TextarooError: If the API returns an error.
+        """
+        client = await self._get_client()
+        response = await client.delete("/v1/account/pin")
+        return _parse_json_response(response, "Removing the PIN failed")
+
     # ── Webhooks ────────────────────────────────────────────────
 
     async def set_webhook(self, url: str, auth_header: str | None = None) -> dict[str, Any]:

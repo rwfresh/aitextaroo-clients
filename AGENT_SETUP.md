@@ -66,7 +66,7 @@ aitextaroo send "Build finished: 318 tests passing."
 aitextaroo ask "Deploy to production? Reply YES or NO" --timeout 120   # text, then wait for the answer
 aitextaroo recent                                                       # texts from the last 5 minutes
 aitextaroo relay --to +12125550100 --name Mom "Happy birthday!"        # Pro
-aitextaroo verify-pin 4821
+aitextaroo verify-pin <<< 4821    # PIN on stdin stays out of shell history
 aitextaroo account
 aitextaroo connect          # how to add the MCP server to Claude Code, Codex, Gemini CLI, Cursor…
 ```
@@ -114,9 +114,10 @@ returned at registration) and, if set, the `Authorization` header.
 ## Good texts
 
 Plain text, short, and say what reply you need. Before sensitive actions, ask
-the user to text their PIN and check it (`aitextaroo verify-pin`, which exits 2
-when the PIN is wrong, or the `verify_pin` MCP tool). Never ask the user to
-text passwords or card numbers.
+the user to text their PIN and check it (`aitextaroo verify-pin`, which reads
+the PIN from stdin and exits 2 when it's wrong, or the `verify_pin` MCP tool).
+No PIN yet? Ask the user to pick 4–8 digits and run `aitextaroo set-pin`. The
+PIN is the only secret to ask for by text: never ask for passwords or card numbers.
 
 ## Plans and limits
 
