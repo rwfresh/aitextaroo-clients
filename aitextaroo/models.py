@@ -59,12 +59,15 @@ class ErrorEvent:
     """Emitted when the server closes the stream due to an error.
 
     Attributes:
-        code: Machine-readable error code: "reconnect_required" (reconnect),
-            "evicted" (another stream took over the account) or
+        code: Machine-readable error code: "server_restarting" (a deploy;
+            reconnect after retry_after seconds), "reconnect_required"
+            (reconnect), "evicted" (another stream took over the account) or
             "credential_revoked" (the key was removed from the account).
-            TextarooClient.listen() stops for good on the last two.
+            TextarooClient.listen() stops for good on the last two and
+            reconnects on any other code.
         message: Human-readable description.
-        retry_after: Seconds to wait before reconnecting (if applicable).
+        retry_after: Seconds to wait before reconnecting, if the server says
+            (it does for "server_restarting").
     """
 
     code: str

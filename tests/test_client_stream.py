@@ -7,7 +7,13 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from aitextaroo.client import STREAM_READ_TIMEOUT, STREAM_STOPS, TextarooClient, TextarooError
+from aitextaroo.client import (
+    DEFAULT_RECONNECT_DELAY,
+    STREAM_READ_TIMEOUT,
+    STREAM_STOPS,
+    TextarooClient,
+    TextarooError,
+)
 
 CONNECTED = ("connected", None, {"user_id": "u1", "assigned_number": "+15551110000"})
 SSE_HEADERS = {"content-type": "text/event-stream"}
@@ -145,6 +151,43 @@ class TestStreamReconnects:
         assert len(seen) == 2
         assert seen[1].headers["Last-Event-ID"] == "m1"
         sleep.assert_awaited_once()
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_server_restarting_waits_retry_after_then_reconnects(self, sleep) -> None:
+        # A deploy: every stream gets this, and must come back on its own.
+        restarting = (
+            "error",
+            None,
+            {"code": "server_restarting", "message": "Restarting.", "retry_after": 7},
+        )
+        client, seen = _streaming_client(
+            _sse(CONNECTED, _message("m1", "before"), restarting),
+            _sse(CONNECTED, _message("m2", "after"), _error("credential_revoked")),
+        )
+        texts, error = await _collect(client)
+        assert texts == ["before", "after"]
+        assert error is not None
+        assert error.code == "credential_revoked"
+        assert len(seen) == 2
+        assert seen[1].headers["Last-Event-ID"] == "m1"
+        sleep.assert_awaited_once_with(7.0)
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_unknown_codes_reconnect(self, sleep) -> None:
+        # Only the codes in STREAM_STOPS stop for good, so a code added to the
+        # API later never strands a bridge.
+        client, seen = _streaming_client(
+            _sse(CONNECTED, _error("some_new_code")),
+            _sse(CONNECTED, _message("m1", "still here"), _error("evicted")),
+        )
+        texts, error = await _collect(client)
+        assert texts == ["still here"]
+        assert error is not None
+        assert error.code == "evicted"
+        assert len(seen) == 2
+        sleep.assert_awaited_once_with(DEFAULT_RECONNECT_DELAY)
         await client.close()
 
     @pytest.mark.asyncio

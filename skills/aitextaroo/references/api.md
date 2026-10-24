@@ -23,7 +23,7 @@ Each confirmation adds a key named `label` (optional, 1–40 letters, digits, sp
 
 An inbound message looks like `{"id": "<uuid>", "text": "…", "received_at": "…", "channel": "sms", "trust_level": "low", "has_pin": true}`.
 
-The stream can end with an `error` event, `{"code": "…", "message": "…"}`: `reconnect_required` (reconnect), `evicted` (another stream took over the account; don't reconnect automatically, or the two take turns kicking each other off) or `credential_revoked` (the key was removed; reconnecting gets a 401).
+The stream can end with an `error` event, `{"code": "…", "message": "…"}`: `server_restarting` (a deploy; reconnect after `retry_after` seconds), `reconnect_required` (reconnect), `evicted` (another stream took over the account; don't reconnect automatically, or the two take turns kicking each other off) or `credential_revoked` (the key was removed; reconnecting gets a 401). Reconnect on any other code. A keepalive comment comes at least every 20 seconds, so a stream that's silent for much longer than that is dead: reconnect.
 
 Delivery order: a pending `/messages/wait` (or MCP `wait_for_reply`) gets the next text first; otherwise it goes to the live `/stream` connection or webhook; otherwise it waits in memory for up to 5 minutes.
 
