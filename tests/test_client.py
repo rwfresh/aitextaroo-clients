@@ -1,5 +1,6 @@
 """Tests for the TextarooClient — API methods and SSE parser."""
 
+import json
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -279,6 +280,55 @@ class TestConfirmVerification:
                 with pytest.raises(TextarooError) as exc_info:
                     await TextarooClient.confirm_verification("+12125551234", "123456")
         assert exc_info.value.status_code == 502
+
+    @staticmethod
+    async def _confirm_recording(
+        status_code: int, body: str, **kwargs
+    ) -> tuple[dict, list[httpx.Request]]:
+        seen: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            return httpx.Response(status_code, content=body.encode())
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport, base_url="https://test.com") as client:
+            with patch("aitextaroo.client.httpx.AsyncClient") as mock_cls:
+                mock_cls.return_value.__aenter__ = AsyncMock(return_value=client)
+                mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+                result = await TextarooClient.confirm_verification(
+                    "+12125551234", "123456", **kwargs
+                )
+        return result, seen
+
+    @pytest.mark.asyncio
+    async def test_sends_the_label_and_returns_the_key_id(self) -> None:
+        body = json.dumps(
+            {"status": "verified", "api_key": "k" * 64, "key_id": "key_0f8c2b9e",
+             "assigned_number": "+18005551234", "tier": "free"}
+        )
+        result, seen = await self._confirm_recording(200, body, label="Bridge on studio-mac")
+        assert result["key_id"] == "key_0f8c2b9e"
+        assert seen[0].url.path == "/v1/auth/confirm"
+        assert json.loads(seen[0].content) == {
+            "phone": "+12125551234",
+            "code": "123456",
+            "label": "Bridge on studio-mac",
+        }
+
+    @pytest.mark.parametrize("label", [None, ""])
+    @pytest.mark.asyncio
+    async def test_no_label_leaves_the_name_to_the_api(self, label) -> None:
+        _, seen = await self._confirm_recording(200, '{"api_key": "k"}', label=label)
+        assert "label" not in json.loads(seen[0].content)
+
+    @pytest.mark.asyncio
+    async def test_rejected_label_is_a_validation_error(self) -> None:
+        body = '{"detail": [{"loc": ["body", "label"], "msg": "Value error, Use 1-40 characters"}]}'
+        with pytest.raises(TextarooError) as exc_info:
+            await self._confirm_recording(422, body, label="no/slashes")
+        assert exc_info.value.code == "validation_error"
+        assert exc_info.value.message.startswith("label: ")
 
 
 class TestSend:

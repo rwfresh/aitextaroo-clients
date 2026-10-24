@@ -6,6 +6,7 @@ Provides:
 3. wait_for_reply()  — ask a question, then wait for the user's answer
 4. text_contact()    — text someone else on the user's behalf (Pro)
 5. PIN checks, recent messages, webhooks and the Pro upgrade link
+6. Connections: list the account's keys and app sign-ins, remove one
 
 The SSE client handles reconnection, Last-Event-ID replay,
 and keepalive parsing automatically. No public IP or webhook
@@ -16,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -42,6 +44,11 @@ MIN_WAIT_SECONDS = 1
 MAX_WAIT_SECONDS = 120
 # Extra HTTP time on top of the wait so the server answers before we give up.
 WAIT_HTTP_MARGIN = 15.0
+
+# A connection id goes into the request path, so only these characters get
+# there: "../../webhook" would otherwise collapse into DELETE /v1/webhook.
+# The API itself answers "connection_not_found" for any id it doesn't know.
+_CONNECTION_ID = re.compile(r"(?:key|app)_[A-Za-z0-9_-]{1,100}")
 
 
 class TextarooError(Exception):
@@ -222,6 +229,7 @@ class TextarooClient:
     async def confirm_verification(
         phone: str,
         code: str,
+        label: str | None = None,
         base_url: str = DEFAULT_BASE_URL,
     ) -> dict[str, Any]:
         """Confirm verification code and receive API key (step 2 of signup).
@@ -229,23 +237,33 @@ class TextarooClient:
         This is a static method — no API key needed. The returned dict
         contains the api_key needed to create a TextarooClient.
 
+        Each confirmation adds a key to the account. If the account already
+        exists, its other keys, app sign-ins and forwarding keep working, and
+        the owner is texted that a key was added. An account holds up to 10
+        keys: an 11th retires the one unused the longest (the owner is texted
+        which).
+
         Args:
             phone: Same phone number used in request_verification.
             code: The 6-digit code received via SMS.
+            label: A name for the key, shown on the dashboard and in the
+                owner's text: 1–40 letters, digits, spaces or . _ ( ) ' @ # : + -
+                (the API's default is "API key").
             base_url: API base URL.
 
         Returns:
-            {"status": "verified", "api_key": "...", "assigned_number": "+1...",
-             "tier": "free", "note": "..."}
+            {"status": "verified", "api_key": "...", "key_id": "key_<uuid>",
+             "assigned_number": "+1...", "tier": "free", "note": "..."}
 
         Raises:
-            TextarooError: If the code is invalid or expired.
+            TextarooError: If the code is invalid or expired, or the label isn't
+                allowed ("validation_error").
         """
+        body = {"phone": phone, "code": code}
+        if label:
+            body["label"] = label
         async with httpx.AsyncClient(base_url=base_url, timeout=30.0) as client:
-            response = await client.post(
-                "/v1/auth/confirm",
-                json={"phone": phone, "code": code},
-            )
+            response = await client.post("/v1/auth/confirm", json=body)
             return _parse_json_response(response, "Verification failed")
 
     # ── Outbound messaging ──────────────────────────────────────
@@ -445,6 +463,63 @@ class TextarooClient:
         client = await self._get_client()
         response = await client.delete("/v1/webhook")
         return _parse_json_response(response, "Webhook removal failed")
+
+    # ── Connections (keys and app sign-ins) ─────────────────────
+
+    async def list_connections(self) -> dict[str, Any]:
+        """The account's API keys and app sign-ins, and what set up forwarding.
+
+        Returns:
+            {"keys": [{"id": "key_<uuid>", "kind": "key", "label", "hint",
+            "created_at", "last_used_at", "current", "forwarding"}, ...],
+            "apps": [{"id": "app_<id>", "kind": "app", "label", "verified",
+            "created_at", "last_used_at", "current", "forwarding"}, ...],
+            "forwarding": {"host", "set_by", "set_at"} | None, "max_keys": 10}.
+            Each list is most recently used first; "current" marks the key
+            this client uses.
+
+        Raises:
+            TextarooError: If the API returns an error.
+        """
+        client = await self._get_client()
+        response = await client.get("/v1/account/connections")
+        return _parse_json_response(response, "Listing connections failed")
+
+    async def remove_connection(self, connection_id: str, pin: str | None = None) -> dict[str, Any]:
+        """Disconnect one API key or app sign-in, when the user asks for it.
+
+        It stops working right away, and forwarding it set up stops too. The
+        user is texted about it ("owner_notified" says whether that text went
+        out). Removing the key this client uses ("was_current") cuts this
+        client off. Signing out everything at once is only on the dashboard.
+
+        Args:
+            connection_id: An id from list_connections(): "key_..." or "app_...".
+            pin: The user's security PIN. Required if they have one.
+
+        Returns:
+            {"status": "removed", "removed": {"id", "kind", "label"},
+            "forwarding_stopped": host | None, "owner_notified": bool,
+            "was_current": bool}
+
+        Raises:
+            TextarooError: "connection_not_found" (also for an id that isn't one,
+                without calling the API), "pin_required" or "pin_incorrect",
+                "pin_locked" or "rate_limit_exceeded", "temporarily_unavailable"
+                (nothing changed), or another API error.
+        """
+        if not isinstance(connection_id, str) or not _CONNECTION_ID.fullmatch(connection_id):
+            raise TextarooError(
+                code="connection_not_found",
+                message="Not a connection id (they start with key_ or app_). List them to find it.",
+            )
+        client = await self._get_client()
+        response = await client.request(
+            "DELETE",
+            f"/v1/account/connections/{connection_id}",
+            json={"pin": pin} if pin else None,
+        )
+        return _parse_json_response(response, "Removing the connection failed")
 
     # ── Billing ─────────────────────────────────────────────────
 
