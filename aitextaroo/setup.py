@@ -3,42 +3,92 @@
 Walks the user (or agent) through phone verification and
 API key generation. Outputs everything needed to run the bridge.
 
+Each run adds a named key to the account. Nothing else is signed out: the
+account's other keys, connected apps and forwarding keep working.
+
 Usage:
     aitextaroo-setup
     aitextaroo-setup --phone +12125551234
     aitextaroo-setup --phone +12125551234 --code 123456
+    aitextaroo-setup --phone +12125551234 --code 123456 --label "Bridge on studio-mac"
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import socket
+import string
 import sys
-from typing import TYPE_CHECKING
+import unicodedata
+from typing import TYPE_CHECKING, NoReturn
 
 from aitextaroo.client import TextarooClient, TextarooError
-from aitextaroo.credentials import CREDENTIALS_PATH, save_credentials
+from aitextaroo.credentials import CREDENTIALS_PATH, load_credentials, save_credentials
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+# What the API accepts as a key label: 1-40 of these, runs of spaces collapsed.
+LABEL_MAX_LENGTH = 40
+_LABEL_CHARS = frozenset(string.ascii_letters + string.digits + " ._()'@#:+-")
 
-def main() -> None:
+
+def main(argv: list[str] | None = None) -> None:
     """Run the setup flow."""
-    args = _parse_args()
+    args = _parse_args(argv)
+    # Check the label before any code is requested or used up.
+    try:
+        label = clean_label(args.label) if args.label is not None else default_label()
+    except ValueError as exc:
+        _exit_error(str(exc))
 
     if args.phone and args.code:
         # Non-interactive: both phone and code provided (agent use)
-        asyncio.run(_confirm(args.phone, args.code, args.base_url, save=args.save))
+        asyncio.run(_confirm(args.phone, args.code, args.base_url, save=args.save, label=label))
     elif args.phone:
         # Semi-interactive: phone provided, need code
         asyncio.run(_verify(args.phone, args.base_url))
     else:
         # Fully interactive
-        _interactive_setup(args.base_url, save=args.save)
+        _interactive_setup(args.base_url, save=args.save, label=label)
 
 
-def _parse_args() -> argparse.Namespace:
+def default_label(hostname: str | None = None) -> str:
+    """'aitextaroo on <short hostname>', cut to what a key label allows."""
+    if hostname is None:
+        try:
+            hostname = socket.gethostname()
+        except OSError:
+            hostname = ""
+    # NFKD splits an accented letter from its accent (é -> e + ´), so the
+    # letter survives when characters a label can't use are dropped.
+    short = unicodedata.normalize("NFKD", hostname.split(".")[0])
+    host = " ".join("".join(c for c in short if c in _LABEL_CHARS).split())
+    if not host:
+        return "aitextaroo"
+    return f"aitextaroo on {host}"[:LABEL_MAX_LENGTH].rstrip()
+
+
+def clean_label(label: str) -> str:
+    """The label as the API will store it: trimmed, runs of spaces collapsed.
+
+    Raises:
+        ValueError: If it's empty, too long, or has characters the API rejects.
+    """
+    cleaned = " ".join(label.split())
+    if not cleaned or len(cleaned) > LABEL_MAX_LENGTH:
+        raise ValueError(f"--label must be 1 to {LABEL_MAX_LENGTH} characters.")
+    bad = "".join(sorted(set(cleaned) - _LABEL_CHARS))
+    if bad:
+        raise ValueError(
+            "--label can only use letters, digits, spaces and . _ ( ) ' @ # : + - "
+            f"(not {bad})."
+        )
+    return cleaned
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="aitextaroo-setup",
         description="Set up AI Text-a-roo — verify your phone and get an API key.",
@@ -64,10 +114,18 @@ def _parse_args() -> argparse.Namespace:
             "and aitextaroo-bridge find it later"
         ),
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--label",
+        help=(
+            "Name for the new key, shown on the dashboard and in the text you get "
+            "about it: 1-40 letters, digits, spaces or . _ ( ) ' @ # : + - "
+            '(default: "aitextaroo on <this computer\'s name>")'
+        ),
+    )
+    return parser.parse_args(argv)
 
 
-def _interactive_setup(base_url: str, save: bool = False) -> None:
+def _interactive_setup(base_url: str, save: bool = False, label: str | None = None) -> None:
     """Fully interactive setup — prompts for phone and code."""
     print("AI Text-a-roo Setup")
     print("=" * 40)
@@ -84,7 +142,7 @@ def _interactive_setup(base_url: str, save: bool = False) -> None:
     if not code:
         _exit_error("Verification code is required.")
 
-    asyncio.run(_confirm(phone, code, base_url, save=save))
+    asyncio.run(_confirm(phone, code, base_url, save=save, label=label))
 
 
 async def _verify(phone: str, base_url: str) -> None:
@@ -98,19 +156,25 @@ async def _verify(phone: str, base_url: str) -> None:
         _exit_error(f"Verification failed: {e.message}")
 
 
-async def _confirm(phone: str, code: str, base_url: str, save: bool = False) -> None:
+async def _confirm(
+    phone: str, code: str, base_url: str, save: bool = False, label: str | None = None
+) -> None:
     """Confirm the code, display credentials, and optionally save the key."""
     try:
         result = await TextarooClient.confirm_verification(
-            phone=phone, code=code, base_url=base_url,
+            phone=phone, code=code, label=label, base_url=base_url,
         )
     except TextarooError as e:
         _exit_error(f"Confirmation failed: {e.message}")
 
     api_key = result.get("api_key", "ERROR")
+    key_id = result.get("key_id")
     assigned = result.get("assigned_number", "unknown")
     tier = result.get("tier", "free")
 
+    # A new key doesn't replace the one saved before: that one stays on the
+    # account, so say so instead of quietly dropping our only copy of it.
+    previous = (load_credentials() or {}).get("api_key") if save else None
     # Save first: if it fails (say HOME isn't writable), fall back to showing
     # the key in full exactly as without --save, so it isn't lost.
     saved_to = _save(api_key, assigned) if save else None
@@ -123,15 +187,27 @@ async def _confirm(phone: str, code: str, base_url: str, save: bool = False) -> 
     print()
     print(f"  Assigned number: {assigned}")
     print(f"  Tier:            {tier}")
+    if label:
+        print(f"  Key label:       {label}")
     # Once saved, the full key doesn't need to sit in the terminal or a log.
     print(f"  API Key:         {_mask(api_key) if saved_to else api_key}")
     print()
     if saved_to:
         print(f"  Saved to {saved_to} (owner-only).")
         print("  aitextaroo and aitextaroo-bridge read it automatically.")
+        if isinstance(previous, str) and previous and previous != api_key:
+            print(f"  The key saved there before (ending in {previous[-4:]}) is still on your")
+            print("  account. If nothing else uses it, remove it on the dashboard or with")
+            print("  `aitextaroo disconnect`.")
     else:
         print("  IMPORTANT: Save this API key now. It cannot be retrieved again.")
         print("  (Re-run with --save to store it in ~/.aitextaroo/credentials.json.)")
+    print()
+    print("  This added a key; nothing else was signed out. Your other keys,")
+    print("  connected apps and forwarding keep working. An account holds up to")
+    print("  10 keys: adding an 11th removes the one unused the longest, and you")
+    print("  get a text saying which. See or remove keys and apps at")
+    print("  aitextaroo.com/dashboard, or run `aitextaroo connections`.")
     print()
     print("Next:")
     print()
@@ -149,6 +225,10 @@ async def _confirm(phone: str, code: str, base_url: str, save: bool = False) -> 
         print(f"AITEXTAROO_API_KEY_SAVED_TO={saved_to}")
     else:
         print(f"AITEXTAROO_API_KEY={api_key}")
+    if key_id:
+        print(f"AITEXTAROO_KEY_ID={key_id}")
+    if label:
+        print(f"AITEXTAROO_KEY_LABEL={label}")
     print(f"AITEXTAROO_ASSIGNED_NUMBER={assigned}")
     print(f"AITEXTAROO_USER_PHONE={phone}")
     print(f"AITEXTAROO_TIER={tier}")
@@ -178,7 +258,7 @@ def _mask(api_key: str) -> str:
     return f"{api_key[:6]}…"
 
 
-def _exit_error(message: str) -> None:
+def _exit_error(message: str) -> NoReturn:
     print(f"Error: {message}", file=sys.stderr)
     sys.exit(1)
 
