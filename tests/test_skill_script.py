@@ -12,7 +12,12 @@ import pytest
 SCRIPT = Path(__file__).resolve().parents[1] / "skills" / "aitextaroo" / "scripts" / "textaroo.py"
 _spec = importlib.util.spec_from_file_location("textaroo_script", SCRIPT)
 textaroo = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(textaroo)
+# No __pycache__ next to the script: the skill folder is copied as it is.
+_write_bytecode, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+try:
+    _spec.loader.exec_module(textaroo)
+finally:
+    sys.dont_write_bytecode = _write_bytecode
 
 KEY_ID = "key_0f8c2b9e-3a41-4d6b-9c1e-7a5d2f4b8e10"
 
