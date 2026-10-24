@@ -15,7 +15,8 @@ Pick the path that matches the environment.
 ## A. Apps with connector settings (Claude, Claude Duet, ChatGPT, Grok Bot)
 
 Add the remote MCP server as a custom connector and sign in with the user's
-phone (OAuth). No API key is needed.
+phone (OAuth). No API key is needed. The user gets a text saying the app
+connected.
 
 ```
 https://api.aitextaroo.com/mcp
@@ -143,7 +144,8 @@ the PIN from stdin and exits 2 when it's wrong, or the `verify_pin` MCP tool).
 No PIN yet? Ask the user to pick 4–8 digits and run `aitextaroo set-pin` (or the
 `set_pin` MCP tool); never choose it for them. Changing or removing a PIN needs the
 current one (`set-pin --current`, `remove-pin`), and the user is texted before any
-change. The PIN is the only secret to ask for by text: never ask for passwords or
+change. If the user forgot it, they can remove it on the dashboard, which always
+works. The PIN is the only secret to ask for by text: never ask for passwords or
 card numbers.
 
 ## Connected apps and keys

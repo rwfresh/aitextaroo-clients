@@ -11,7 +11,7 @@ The user adds a custom connector (an MCP server) and signs in with their phone. 
 - ChatGPT: Plugins → + → Add custom MCP server → paste the URL → OAuth → Create as a plugin. (On ChatGPT Pro, custom MCP servers are limited to read-only tools.)
 - Grok Bot: ask it to "Add a custom MCP server called AI Text-a-roo at https://api.aitextaroo.com/mcp".
 
-During sign-in the user enters their phone number and the code texted to it, then allows access. Once connected, send a short test text with `send_text`.
+During sign-in the user enters their phone number and the code texted to it, then allows access. AI Text-a-roo then texts them that the app connected, so tell them to expect it. Once connected, send a short test text with `send_text`.
 
 ## B. Agents that can run commands or make HTTP requests
 
@@ -146,7 +146,7 @@ Leave out `pin` if the user hasn't set one (`get_account` shows `has_pin`). The 
 
 Forwarding is protected:
 
-- Registering needs the user's PIN if they have one, and changing or removing the PIN needs the current PIN, so it can't be removed first to get around this. Wrong PINs count toward the usual lockouts (3 per 5 minutes, 10 a day).
+- Registering needs the user's PIN if they have one, and changing or removing the PIN needs the current PIN (only the user can skip that, by removing it on the dashboard), so an agent can't remove it first to get around this. Wrong PINs count toward the usual lockouts (3 per 5 minutes, 10 a day).
 - Before forwarding starts, AI Text-a-roo texts the user where their texts will go: the host only (never the full URL), and which host it replaces. If that text can't be sent, nothing changes.
 - The user can text `UNHOOK` to their AI Text-a-roo number anytime to stop forwarding. AI Text-a-roo handles it first, so it never reaches an agent or a contact.
 - The user can also see where their texts go, and stop it, on the dashboard (aitextaroo.com/dashboard). Removing the key or app sign-in that set up forwarding (on the dashboard or with `remove_connection`) stops it too.

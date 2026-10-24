@@ -200,10 +200,15 @@ your agent. Up to 5 texts per minute. Limits reset at midnight UTC.
 - Message content is never written to AI Text-a-roo's database. Texts are held in memory
   for at most five minutes so an agent can catch up after a dropped connection.
 - Phone numbers are encrypted at rest; PINs are stored as bcrypt hashes.
+- Security events such as PIN checks and changes are kept as just a time and a kind, only
+  to enforce their limits, and for two days at most. Records of removed or expired app
+  sign-ins are deleted after 30 days.
 - You get a text whenever a key is added or an app signs in. On the
   [dashboard](https://aitextaroo.com/dashboard) you can see and remove connected apps and
-  keys, stop forwarding, set or remove your PIN, or sign out everything. Agents can list and
-  remove connections too (with your PIN if you set one), and you're texted when they do.
+  keys, stop forwarding, set or remove your PIN (removing it there always works, even if
+  you forgot it), or sign out everything, which also signs out your other browsers. Agents
+  can list connections and remove one too (with your PIN if you set one), and you're texted
+  when one is removed.
 - The bridge's history and the saved credentials live only on your machine.
 - SMS isn't end-to-end encrypted, and sender IDs can be spoofed. The bridge tells every agent
   to ask for your PIN before anything sensitive, because some CLIs (for example `hermes -z`)
