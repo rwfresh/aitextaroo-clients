@@ -58,6 +58,6 @@ Errors return `{"error": {"code": "…", "message": "…"}}` (authentication fai
 - `pin_required` / `pin_incorrect` (403): this change needs the user's PIN, or the PIN was wrong (wrong PINs count toward the lockout).
 - `connection_not_found` (404): no key or app sign-in with that id on this account.
 - `rate_limit_exceeded` (429): more than 5 texts in a minute, or too many PIN, webhook or connection changes.
-- `daily_limit_reached` (429): resets at midnight UTC; until then texts pause both ways. Texts you send, contacts' replies forwarded to the user and the user's `>` replies count; the user's own texts to you don't. One contact's replies are forwarded at most 20 an hour and 50 a day, and none are once 80% of the day's limit is used.
+- `daily_limit_reached` (429): resets at midnight UTC; until then texts pause both ways. Texts you send, contacts' replies forwarded to the user and the user's `>` replies count; the user's own texts to you don't. Contacts' replies are forwarded at most 20 an hour and 50 a day per contact, and not at all once 80% of the day's limit is used.
 - `pin_locked` (429): too many wrong PIN attempts; try again in a few minutes.
 - `temporarily_unavailable` (503): security checks are unavailable right now, so nothing changed; try again in a minute.
