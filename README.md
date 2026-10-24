@@ -213,7 +213,7 @@ Details: <https://aitextaroo.com/security>.
 
 Bump the version in `pyproject.toml`, `aitextaroo/__init__.py`, `plugin.json`,
 `.claude-plugin/plugin.json` and `gemini-extension.json`, merge to `main`, then push a
-matching tag: `git tag v0.2.2 && git push origin v0.2.2`. The
+matching tag: `git tag v0.3.0 && git push origin v0.3.0`. The
 [Release workflow](.github/workflows/release.yml) tests, builds and publishes to PyPI with
 Trusted Publishing.
 
