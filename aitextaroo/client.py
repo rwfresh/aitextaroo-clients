@@ -266,8 +266,9 @@ class TextarooClient:
         Each confirmation adds a key to the account. If the account already
         exists, its other keys, app sign-ins and forwarding keep working, and
         the owner is texted that a key was added. An account holds up to 10
-        keys: an 11th retires the one unused the longest (the owner is texted
-        which).
+        keys: an 11th retires the one unused the longest, never the one that
+        forwards the owner's texts when another can go ("retired" lists it,
+        and the owner is texted which).
 
         Args:
             phone: Same phone number used in request_verification.
@@ -279,7 +280,10 @@ class TextarooClient:
 
         Returns:
             {"status": "verified", "api_key": "...", "key_id": "key_<uuid>",
-             "assigned_number": "+1...", "tier": "free", "note": "..."}
+             "assigned_number": "+1...", "tier": "free", "note": "...",
+             "retired": [{"id": "key_<uuid>", "label": "...",
+             "forwarding_stopped": "<host>" | None}]}. The note says first
+            what changed; "retired" is usually empty.
 
         Raises:
             TextarooError: If the code is invalid or expired, or the label isn't

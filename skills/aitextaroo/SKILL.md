@@ -75,7 +75,7 @@ SMS sender IDs can be spoofed. Before anything sensitive (spending money, sendin
 
 ## Connected apps and keys
 
-Each phone verification adds a named key (`aitextaroo-setup`, `scripts/textaroo.py confirm`, or "Create a new key" on the dashboard), and apps such as Grok, Claude or ChatGPT sign in with the user's phone. Adding one never signs out the others, and forwarding stays as it was. The user gets a text whenever a key is added or an app signs in. An account holds up to 10 keys: adding an 11th removes the one unused the longest, and the user is texted which.
+Each phone verification adds a named key (`aitextaroo-setup`, `scripts/textaroo.py confirm`, or "Create a new key" on the dashboard), and apps such as Grok, Claude or ChatGPT sign in with the user's phone. Adding one never signs out the others, and forwarding stays as it was. The user gets a text whenever a key is added or an app signs in. An account holds up to 10 keys: adding an 11th removes the one unused the longest (never the one that forwards the user's texts), and the user is texted which.
 
 - **What's connected?** Call `list_connections` (or run `connections`). Each key and app sign-in has a label and when it was last used; `current` is you, and `forwarding` marks the one that set up forwarding.
 - **Disconnect one** only when the user asks ("disconnect my old laptop"). Confirm which one first, by its label and when it was last used, then call `remove_connection` with its id, plus the PIN if `has_pin` is true (`disconnect <id> --pin` reads it from stdin or a hidden prompt). It stops working right away, forwarding it set up stops too, and the user is texted. Removing your own connection (`current: true`) cuts you off.

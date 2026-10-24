@@ -44,7 +44,8 @@ aitextaroo send "Hello from my agent!"
 Each verification adds a key, named with `--label` (default "aitextaroo on <computer name>").
 If you already have an account, nothing else is signed out: your other keys, connected apps
 and forwarding keep working, and you get a text saying a key was added. An account holds up
-to 10 keys; adding an 11th removes the one unused the longest.
+to 10 keys; adding an 11th removes the one unused the longest, never the one that forwards
+your texts (setup prints which, and you get a text about it).
 
 ## The `aitextaroo` command
 
@@ -157,7 +158,7 @@ asyncio.run(main())
 | `remove_connection(connection_id, pin=None)` | Disconnect one key or app sign-in. `pin` is required if the user has one; forwarding it set up stops too, and the user is texted. |
 | `account()` | Plan, assigned number, usage and daily limit. |
 | `upgrade_link()` | Stripe checkout link for Pro. |
-| `TextarooClient.request_verification(phone)` / `confirm_verification(phone, code, *, label=None)` | Sign-up, no key needed. Confirming adds a key named `label` and returns `api_key` and `key_id`; nothing else is signed out. |
+| `TextarooClient.request_verification(phone)` / `confirm_verification(phone, code, *, label=None)` | Sign-up, no key needed. Confirming adds a key named `label` and returns `api_key`, `key_id`, a `note` and `retired` (any key removed to stay at 10); nothing else is signed out. |
 
 `InboundMessage` has `id`, `text`, `received_at`, `channel` (`"sms"`), `trust_level` and
 `has_pin`. See [`examples/`](examples/) for an echo bot, a listener and an ask-and-wait flow.

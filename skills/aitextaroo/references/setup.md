@@ -26,8 +26,8 @@ During sign-in the user enters their phone number and the code texted to it, the
    - Script: `python3 scripts/textaroo.py confirm --phone +12125551234 --code 123456`
    - HTTP: `POST https://api.aitextaroo.com/v1/auth/confirm` with `{"phone": "+12125551234", "code": "123456", "label": "Claude on studio-mac"}`
    - `label` names the key on the dashboard and in the text the user gets: 1–40 letters, digits, spaces or `. _ ( ) ' @ # : + -`. `aitextaroo-setup` and the script take `--label`; by default they use "aitextaroo on <computer name>" and "aitextaroo skill on <computer name>".
-   - The response contains `api_key`, `key_id`, `assigned_number` and `tier`.
-5. Store the API key somewhere you can read in future sessions (a secrets store, a config file only the user can read, or the `AITEXTAROO_API_KEY` environment variable). It's shown once and can't be retrieved later. Confirming a code for a phone that already has an account adds another key: the account's other keys, app sign-ins and forwarding keep working, and the user gets a text saying a key was added. An account holds up to 10 keys; adding an 11th removes the one unused the longest.
+   - The response contains `api_key`, `key_id`, `assigned_number`, `tier`, a `note` saying what changed, and `retired` (any key removed to stay at 10; usually none).
+5. Store the API key somewhere you can read in future sessions (a secrets store, a config file only the user can read, or the `AITEXTAROO_API_KEY` environment variable). It's shown once and can't be retrieved later. Confirming a code for a phone that already has an account adds another key: the account's other keys, app sign-ins and forwarding keep working, and the user gets a text saying a key was added. An account holds up to 10 keys; adding an 11th removes the one unused the longest (never the one that forwards the user's texts), and the user is texted which.
 6. Tell the user: "You're set up. Save <assigned_number> as a contact (for example, “My AI”) and text it anytime."
 7. Send a test text so they can save the number.
 

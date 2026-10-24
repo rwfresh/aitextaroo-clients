@@ -53,8 +53,10 @@ https://api.aitextaroo.com/mcp
    key, named "aitextaroo on <computer name>" unless you pass `--label`. If the
    phone already has an account, nothing else is signed out: its other keys,
    connected apps (including OAuth connectors like Grok or Claude) and forwarding
-   keep working. The user gets a text saying a key was added, so tell them to
-   expect it.
+   keep working. An account holds up to 10 keys: adding an 11th removes the one
+   unused the longest (never the one that forwards the user's texts), and the
+   user is texted which. The user gets a text saying a key was added, so tell
+   them to expect it.
 
 4. Tell the user their AI's number (`assigned_number`) and suggest saving it as a
    contact such as "My AI". Then send a test text:
