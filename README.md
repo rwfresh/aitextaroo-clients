@@ -64,7 +64,7 @@ aitextaroo set-pin --current                                            # change
 aitextaroo remove-pin                                                   # needs the current PIN
 aitextaroo account
 aitextaroo upgrade                                                      # Stripe link for Pro
-aitextaroo webhook set https://example.com/hook --auth-header "Bearer <token>" --pin   # --pin if a PIN is set
+aitextaroo webhook set https://example.com/hook --auth-header "Bearer <token>"   # add --pin if a PIN is set
 aitextaroo connect [claude-code|codex|gemini|cursor|muse-code|claude|chatgpt|grok]
 ```
 
