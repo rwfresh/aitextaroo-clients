@@ -144,6 +144,9 @@ def main() -> None:
 
     json.dump(result, sys.stdout, indent=2)
     sys.stdout.write("\n")
+    # Like `aitextaroo verify-pin`: a wrong PIN exits 2 so `verify-pin ... && act` stops.
+    if args.command == "verify-pin" and result.get("verified") is not True:
+        sys.exit(2)
 
 
 if __name__ == "__main__":
