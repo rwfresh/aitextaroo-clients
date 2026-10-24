@@ -24,9 +24,10 @@ During sign-in the user enters their phone number and the code texted to it, the
 4. Confirm it:
    - With the package: `aitextaroo-setup --phone +12125551234 --code 123456 --save` (stores the key in `~/.aitextaroo/credentials.json`, owner-only, where `aitextaroo` and the bridge find it)
    - Script: `python3 scripts/textaroo.py confirm --phone +12125551234 --code 123456`
-   - HTTP: `POST https://api.aitextaroo.com/v1/auth/confirm` with `{"phone": "+12125551234", "code": "123456"}`
-   - The response contains `api_key`, `assigned_number` and `tier`.
-5. Store the API key somewhere you can read in future sessions (a secrets store, a config file only the user can read, or the `AITEXTAROO_API_KEY` environment variable). It's shown once and can't be retrieved later. Confirming a code for a phone that already has an account issues a new key, and the old key stops working.
+   - HTTP: `POST https://api.aitextaroo.com/v1/auth/confirm` with `{"phone": "+12125551234", "code": "123456", "label": "Claude on studio-mac"}`
+   - `label` names the key on the dashboard and in the text the user gets: 1–40 letters, digits, spaces or `. _ ( ) ' @ # : + -`. `aitextaroo-setup` and the script take `--label`; by default they use "aitextaroo on <computer name>" and "aitextaroo skill on <computer name>".
+   - The response contains `api_key`, `key_id`, `assigned_number` and `tier`.
+5. Store the API key somewhere you can read in future sessions (a secrets store, a config file only the user can read, or the `AITEXTAROO_API_KEY` environment variable). It's shown once and can't be retrieved later. Confirming a code for a phone that already has an account adds another key: the account's other keys, app sign-ins and forwarding keep working, and the user gets a text saying a key was added. An account holds up to 10 keys; adding an 11th removes the one unused the longest.
 6. Tell the user: "You're set up. Save <assigned_number> as a contact (for example, “My AI”) and text it anytime."
 7. Send a test text so they can save the number.
 
@@ -54,11 +55,11 @@ nohup aitextaroo-bridge > ~/aitextaroo.log 2>&1 &
 - Conversation history is saved locally in `~/.aitextaroo/sessions/`.
 - The user can text `/help`, `/new` (start a fresh conversation) and `/status`.
 - Check it's running with `pgrep -f aitextaroo-bridge`; read logs with `tail -20 ~/aitextaroo.log`.
-- Only one stream per API key: starting a second bridge disconnects the first.
+- Only one stream per account: starting a second bridge, even with another key, stops the first one. A bridge also stops when its key is removed from the account (it says to run `aitextaroo-setup --save` for a new one). Either way it exits cleanly instead of reconnecting, so two bridges never take turns kicking each other off.
 
 ### Keep it running after a restart
 
-`nohup` stops when the computer restarts. To have the bridge start on its own, run it as a background service. Replace `claude` with your agent (the `--agent` value above). Both snippets record the bridge's full path and the current `PATH` when you run them, so the service can find your agent's command; run them from a shell where `claude` (or your agent) works. Each starts by checking the bridge is installed, and stops if it isn't (run `pipx ensurepath` and open a new shell, then try again).
+`nohup` stops when the computer restarts. To have the bridge start on its own, run it as a background service. Replace `claude` with your agent (the `--agent` value above). Both snippets record the bridge's full path and the current `PATH` when you run them, so the service can find your agent's command; run them from a shell where `claude` (or your agent) works. Each starts by checking the bridge is installed, and stops if it isn't (run `pipx ensurepath` and open a new shell, then try again). The service restarts the bridge if it fails, but not after a clean stop (its key was removed, or another bridge took over); once that's sorted, start it again with the restart command below.
 
 Linux (systemd user service):
 
@@ -75,7 +76,7 @@ Description=AI Text-a-roo SMS bridge
 ExecStart=$BRIDGE --agent claude
 WorkingDirectory=$HOME
 Environment="PATH=$PATH"
-Restart=always
+Restart=on-failure
 RestartSec=10
 
 [Install]
@@ -87,7 +88,7 @@ loginctl enable-linger "$USER"   # keep it running while logged out
 )
 ```
 
-If `loginctl enable-linger` fails (it can need a password, and an agent's shell can't type one), ask the user to run `sudo loginctl enable-linger $USER` in Terminal. Without it, the bridge runs only while they're logged in. Check it with `systemctl --user status aitextaroo-bridge`; logs: `journalctl --user -u aitextaroo-bridge -n 20`.
+If `loginctl enable-linger` fails (it can need a password, and an agent's shell can't type one), ask the user to run `sudo loginctl enable-linger $USER` in Terminal. Without it, the bridge runs only while they're logged in. Check it with `systemctl --user status aitextaroo-bridge`; logs: `journalctl --user -u aitextaroo-bridge -n 20`. Restart: `systemctl --user restart aitextaroo-bridge`.
 
 macOS (launchd agent):
 
@@ -112,7 +113,7 @@ cat > ~/Library/LaunchAgents/com.aitextaroo.bridge.plist <<EOF
   <key>EnvironmentVariables</key>
   <dict><key>PATH</key><string>$PATH</string></dict>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
   <key>StandardOutPath</key><string>$HOME/aitextaroo.log</string>
   <key>StandardErrorPath</key><string>$HOME/aitextaroo.log</string>
 </dict>
@@ -144,6 +145,7 @@ Forwarding is protected:
 - Registering needs the user's PIN if they have one, and changing or removing the PIN needs the current PIN, so it can't be removed first to get around this. Wrong PINs count toward the usual lockouts (3 per 5 minutes, 10 a day).
 - Before forwarding starts, AI Text-a-roo texts the user where their texts will go: the host only (never the full URL), and which host it replaces. If that text can't be sent, nothing changes.
 - The user can text `UNHOOK` to their AI Text-a-roo number anytime to stop forwarding. AI Text-a-roo handles it first, so it never reaches an agent or a contact.
+- The user can also see where their texts go, and stop it, on the dashboard (aitextaroo.com/dashboard). Removing the key or app sign-in that set up forwarding (on the dashboard or with `remove_connection`) stops it too.
 - Only public HTTPS URLs with plain-ASCII host names are accepted, and at most 5 webhook changes an hour and 10 a day.
 
 Remove it with `DELETE /v1/webhook` or `remove_webhook`; the user is texted that forwarding is off.

@@ -7,7 +7,9 @@ Base URL: `https://api.aitextaroo.com/v1`. Authenticated endpoints need `Authori
 | Method | Path | Body | Returns |
 |---|---|---|---|
 | POST | `/auth/verify` | `{"phone": "+12125551234"}` | `{"status": "code_sent", "expires_in": 300}` |
-| POST | `/auth/confirm` | `{"phone": "+12125551234", "code": "123456"}` | `{"api_key", "assigned_number", "tier", ...}` |
+| POST | `/auth/confirm` | `{"phone": "+12125551234", "code": "123456", "label": "Claude on studio-mac"}` | `{"api_key", "key_id", "assigned_number", "tier", "note"}` |
+
+Each confirmation adds a key named `label` (optional, 1–40 letters, digits, spaces or `. _ ( ) ' @ # : + -`; default "API key"). If the account already exists, its other keys, app sign-ins and forwarding keep working, and the user is texted that a key was added. Up to 10 keys: an 11th removes the one unused the longest, and the user is texted which.
 
 ## Messaging
 
@@ -17,9 +19,11 @@ Base URL: `https://api.aitextaroo.com/v1`. Authenticated endpoints need `Authori
 | POST | `/send` | `{"text": "…", "to": "+1…", "recipient_name": "Mom"}` | Texts a contact (Pro). Replies are forwarded to the user. |
 | POST | `/messages/wait` | `{"timeout_seconds": 60}` (1–120) | Waits for the user's next text. Returns `{"message": {...} \| null, "timed_out": bool}`. |
 | GET | `/messages/recent` | `?after_id=<message id>` (optional) | Texts from the last 5 minutes: `{"messages": [...], "retention_seconds": 300}`. |
-| GET | `/stream` | `Accept: text/event-stream` | Server-Sent Events stream of inbound texts. One stream per key; supports `Last-Event-ID`. |
+| GET | `/stream` | `Accept: text/event-stream` | Server-Sent Events stream of inbound texts. One stream per account; supports `Last-Event-ID`. |
 
 An inbound message looks like `{"id": "<uuid>", "text": "…", "received_at": "…", "channel": "sms", "trust_level": "low", "has_pin": true}`.
+
+The stream can end with an `error` event, `{"code": "…", "message": "…"}`: `reconnect_required` (reconnect), `evicted` (another stream took over the account; don't reconnect automatically, or the two take turns kicking each other off) or `credential_revoked` (the key was removed; reconnecting gets a 401).
 
 Delivery order: a pending `/messages/wait` (or MCP `wait_for_reply`) gets the next text first; otherwise it goes to the live `/stream` connection or webhook; otherwise it waits in memory for up to 5 minutes.
 
@@ -33,6 +37,10 @@ Delivery order: a pending `/messages/wait` (or MCP `wait_for_reply`) gets the ne
 | POST | `/verify-pin` | `{"pin": "4821"}` | `{"verified": bool, "attempts_remaining": int \| null}`. Only wrong PINs count: 3 per 5 minutes and 10 a day pause checks. |
 | POST | `/webhook` | `{"url": "https://…", "auth_header": "Bearer …", "pin": "4821"}` | Forward inbound texts to a URL. `auth_header` is optional; `pin` is required if the user has one. The user is texted the destination first and can reply `UNHOOK` to stop it. |
 | DELETE | `/webhook` | | Stop webhook delivery (the user is texted). |
+| GET | `/account/connections` | | The account's keys and app sign-ins (see below). |
+| DELETE | `/account/connections/{id}` | `{"pin": "4821"}` (only if the user has a PIN) | Disconnect one key or app sign-in. It stops working right away, forwarding it set up stops too, and the user is texted. At most 5 removals an hour and 10 a day. Returns `{"status": "removed", "removed": {"id", "kind", "label"}, "forwarding_stopped": "<host>" \| null, "owner_notified": bool, "was_current": bool}`. |
+
+`GET /account/connections` returns `{"keys": [...], "apps": [...], "forwarding": {"host", "set_by", "set_at"} | null, "max_keys": 10}`. Each entry has `id` (`key_…` or `app_…`), `kind` (`key` or `app`), `label`, `created_at`, `last_used_at` (or null), `current` (the key or sign-in making this request) and `forwarding` (it set up forwarding); keys also have `hint` (the key's last 4 characters, like `...3f9a`), apps have `verified`. Most recently used first. Signing out everything at once is only on the dashboard, aitextaroo.com/dashboard.
 
 ## Billing
 
@@ -45,8 +53,11 @@ Delivery order: a pending `/messages/wait` (or MCP `wait_for_reply`) gets the ne
 
 Errors return `{"error": {"code": "…", "message": "…"}}` (authentication failures wrap the same object in `detail`). Common codes:
 
-- `unauthorized` (401): missing, wrong or regenerated API key.
+- `unauthorized` (401): missing or wrong API key, or one that was removed from the account.
 - `tier_required` (403): texting contacts needs Pro.
-- `rate_limit_exceeded` (429): more than 5 texts in a minute.
-- `daily_limit_reached` (429): resets at midnight UTC.
+- `pin_required` / `pin_incorrect` (403): this change needs the user's PIN, or the PIN was wrong (wrong PINs count toward the lockout).
+- `connection_not_found` (404): no key or app sign-in with that id on this account.
+- `rate_limit_exceeded` (429): more than 5 texts in a minute, or too many PIN, webhook or connection changes.
+- `daily_limit_reached` (429): resets at midnight UTC. Texts you send, contacts' replies forwarded to the user and the user's `>` replies count; the user's own texts to you don't. One contact's replies are forwarded at most 20 an hour and 50 a day.
 - `pin_locked` (429): too many wrong PIN attempts; try again in a few minutes.
+- `temporarily_unavailable` (503): security checks are unavailable right now, so nothing changed; try again in a minute.
