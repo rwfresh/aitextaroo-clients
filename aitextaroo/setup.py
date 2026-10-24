@@ -4,7 +4,9 @@ Walks the user (or agent) through phone verification and
 API key generation. Outputs everything needed to run the bridge.
 
 Each run adds a named key to the account. Nothing else is signed out: the
-account's other keys, connected apps and forwarding keep working.
+account's other keys, connected apps and forwarding keep working. An account
+holds up to 10 keys, so an 11th removes the one unused the longest (never the
+one that forwards the owner's texts); the output says which.
 
 Usage:
     aitextaroo-setup
@@ -17,9 +19,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import re
 import socket
 import string
 import sys
+import textwrap
 import unicodedata
 from typing import TYPE_CHECKING, NoReturn
 
@@ -171,9 +175,12 @@ async def _confirm(
     key_id = result.get("key_id")
     assigned = result.get("assigned_number", "unknown")
     tier = result.get("tier", "free")
+    # The API's note says first what changed (a key removed to stay at 10, say).
+    note = result.get("note")
+    removed = _removed_keys(result.get("retired"))
 
-    # A new key doesn't replace the one saved before: that one stays on the
-    # account, so say so instead of quietly dropping our only copy of it.
+    # A new key doesn't replace the one saved before: that one may still be
+    # on the account, so say so instead of quietly dropping our only copy.
     previous = (load_credentials() or {}).get("api_key") if save else None
     # Save first: if it fails (say HOME isn't writable), fall back to showing
     # the key in full exactly as without --save, so it isn't lost.
@@ -185,29 +192,39 @@ async def _confirm(
     print("Setup complete!")
     print("=" * 40)
     print()
+    if isinstance(note, str) and note.strip():
+        _say(note)
+        print()
     print(f"  Assigned number: {assigned}")
     print(f"  Tier:            {tier}")
     if label:
         print(f"  Key label:       {label}")
     # Once saved, the full key doesn't need to sit in the terminal or a log.
     print(f"  API Key:         {_mask(api_key) if saved_to else api_key}")
+    for line in removed:
+        print(f"  Removed key:     {line}")
     print()
     if saved_to:
         print(f"  Saved to {saved_to} (owner-only).")
         print("  aitextaroo and aitextaroo-bridge read it automatically.")
         if isinstance(previous, str) and previous and previous != api_key:
-            print(f"  The key saved there before (ending in {previous[-4:]}) is still on your")
-            print("  account. If nothing else uses it, remove it on the dashboard or with")
-            print("  `aitextaroo disconnect`.")
+            _say(
+                f"The key saved there before (ending in {previous[-4:]}) may still be on "
+                "your account, and a bridge started before now keeps using it until it's "
+                "restarted. Once nothing uses it, remove it on the dashboard or with "
+                "`aitextaroo disconnect`."
+            )
     else:
         print("  IMPORTANT: Save this API key now. It cannot be retrieved again.")
         print("  (Re-run with --save to store it in ~/.aitextaroo/credentials.json.)")
     print()
-    print("  This added a key; nothing else was signed out. Your other keys,")
-    print("  connected apps and forwarding keep working. An account holds up to")
-    print("  10 keys: adding an 11th removes the one unused the longest, and you")
-    print("  get a text saying which. See or remove keys and apps at")
-    print("  aitextaroo.com/dashboard, or run `aitextaroo connections`.")
+    _say(
+        "Adding a key doesn't sign anything else out: your other keys, connected apps "
+        "and forwarding keep working. An account holds up to 10 keys; adding an 11th "
+        "removes the one unused the longest, never the one that forwards your texts "
+        "(the note above and a text to you say which). See or remove keys and apps at "
+        "aitextaroo.com/dashboard, or run `aitextaroo connections`."
+    )
     print()
     print("Next:")
     print()
@@ -251,6 +268,48 @@ def _save(api_key: str, assigned: str) -> Path | None:
             file=sys.stderr,
         )
         return None
+
+
+def _removed_keys(retired: object) -> list[str]:
+    """Each key the API removed to stay at 10, as '"label" (why)'; [] when none.
+
+    The API lists them as [{"id": "key_...", "label": "...",
+    "forwarding_stopped": "<host>" | None}].
+    """
+    if not isinstance(retired, list):
+        return []
+    lines = []
+    for key in retired:
+        if not isinstance(key, dict):
+            continue
+        name = key.get("label") or key.get("id")
+        if not isinstance(name, str) or not name:
+            continue
+        why = "to stay at 10 keys"
+        host = key.get("forwarding_stopped")
+        if isinstance(host, str) and host:
+            why += f"; forwarding to {host} is off"
+        lines.append(f'"{name}" ({why})')
+    return lines
+
+
+def _say(text: str) -> None:
+    """Print a paragraph, indented like the rest of the output and wrapped to fit.
+
+    A `command` in backticks stays on one line, ready to copy.
+    """
+    # textwrap only breaks at ASCII whitespace, so a no-break space holds a
+    # command together until it's printed.
+    held = re.sub(r"`[^`]*`", lambda command: command.group().replace(" ", "\u00a0"), text)
+    wrapped = textwrap.fill(
+        held,
+        width=74,
+        initial_indent="  ",
+        subsequent_indent="  ",
+        break_long_words=False,
+        break_on_hyphens=False,  # keeps "aitextaroo-setup" in one piece
+    )
+    print(wrapped.replace("\u00a0", " "))
 
 
 def _mask(api_key: str) -> str:

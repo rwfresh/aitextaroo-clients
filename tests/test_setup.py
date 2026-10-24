@@ -78,9 +78,44 @@ class TestConfirmOutput:
     async def test_says_a_key_was_added_and_nothing_was_signed_out(self, capsys) -> None:
         await _confirm(save=False, saver=MagicMock())
         out = " ".join(capsys.readouterr().out.split())
-        assert "This added a key; nothing else was signed out." in out
-        assert "Your other keys, connected apps and forwarding keep working." in out
-        assert "adding an 11th removes the one unused the longest" in out
+        assert (
+            "Adding a key doesn't sign anything else out: your other keys, connected apps "
+            "and forwarding keep working." in out
+        )
+        assert (
+            "adding an 11th removes the one unused the longest, never the one that forwards "
+            "your texts (the note above and a text to you say which)." in out
+        )
+
+    @pytest.mark.asyncio
+    async def test_prints_the_api_note_under_setup_complete(self, capsys) -> None:
+        note = (
+            '"aitextaroo on studio-mac" was removed to stay at 10 keys. Key added. Your other '
+            "keys and connected apps keep working. See or remove keys at aitextaroo.com/dashboard."
+        )
+        await _confirm(save=False, saver=MagicMock(), result={**RESULT, "note": note})
+        out = " ".join(capsys.readouterr().out.split())
+        assert out.index("Setup complete!") < out.index(note) < out.index("Assigned number:")
+
+    @pytest.mark.asyncio
+    async def test_names_each_key_removed_to_stay_at_10(self, capsys) -> None:
+        retired = [
+            {"id": "key_1", "label": "aitextaroo on studio-mac", "forwarding_stopped": None},
+            {"id": "key_2", "label": "Old laptop", "forwarding_stopped": "api.x.ai"},
+        ]
+        await _confirm(save=False, saver=MagicMock(), result={**RESULT, "retired": retired})
+        out = capsys.readouterr().out
+        assert '  Removed key:     "aitextaroo on studio-mac" (to stay at 10 keys)\n' in out
+        assert (
+            '  Removed key:     "Old laptop" (to stay at 10 keys; forwarding to api.x.ai is off)\n'
+            in out
+        )
+
+    @pytest.mark.parametrize("retired", [None, [], "junk", [1, None, {"id": "", "label": ""}]])
+    @pytest.mark.asyncio
+    async def test_nothing_about_removed_keys_when_none_were(self, capsys, retired) -> None:
+        await _confirm(save=False, saver=MagicMock(), result={**RESULT, "retired": retired})
+        assert "Removed key" not in capsys.readouterr().out
 
     @pytest.mark.asyncio
     async def test_label_is_sent_and_reported_with_the_key_id(self, capsys) -> None:
@@ -107,7 +142,11 @@ class TestConfirmOutput:
             saved_before={"api_key": "old_key_ending_3f9a"},
         )
         out = " ".join(capsys.readouterr().out.split())
-        assert "The key saved there before (ending in 3f9a) is still on your account." in out
+        assert (
+            "The key saved there before (ending in 3f9a) may still be on your account, and a "
+            "bridge started before now keeps using it until it's restarted. Once nothing uses "
+            "it, remove it on the dashboard or with `aitextaroo disconnect`." in out
+        )
         assert "old_key" not in out  # only the part the dashboard shows as its hint
 
     @pytest.mark.parametrize("saved_before", [None, {"api_key": KEY}, {"other": "junk"}])
@@ -115,6 +154,15 @@ class TestConfirmOutput:
     async def test_no_note_without_a_different_saved_key(self, capsys, saved_before) -> None:
         await _confirm(save=True, saver=MagicMock(return_value=SAVED_TO), saved_before=saved_before)
         assert "saved there before" not in capsys.readouterr().out
+
+
+def test_paragraphs_wrap_but_keep_each_command_whole(capsys) -> None:
+    # Plain textwrap would end the first line with "`aitextaroo".
+    setup._say("To see them, open aitextaroo.com/dashboard or run `aitextaroo connections` now.")
+    assert capsys.readouterr().out == (
+        "  To see them, open aitextaroo.com/dashboard or run\n"
+        "  `aitextaroo connections` now.\n"
+    )
 
 
 class TestLabels:
