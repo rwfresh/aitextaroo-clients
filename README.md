@@ -108,7 +108,13 @@ An account has one stream at a time: starting a second bridge, even with another
 the first. A bridge also stops when its key is removed from the account. Either way it says
 why and exits with code 0 instead of reconnecting, so a service set to restart on failure
 leaves it stopped ([setup guide](skills/aitextaroo/references/setup.md), section C). So
-does a key the API rejects (wrong, or removed while the bridge was off).
+does a key the API rejects (wrong, or removed while the bridge was off). Set up a service
+before 0.3.0? Run the guide's snippet again: older service files restart the bridge even
+after a clean stop, so two bridges keep kicking each other off.
+
+The bridge and `listen()` in 0.3.0 need the API released with them, the first that ends
+streams with `server_restarting` when it restarts (api.aitextaroo.com runs it). An older API
+ends every stream with `evicted` when it shuts down, which 0.3.0 treats as a stop.
 
 ```text
 aitextaroo-bridge [OPTIONS]
