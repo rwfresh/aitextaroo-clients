@@ -3,6 +3,7 @@
 Usage:
     aitextaroo-bridge --api-key YOUR_KEY
     aitextaroo-bridge --api-key YOUR_KEY --agent claude
+    aitextaroo-bridge --agent-command "pnpm --silent --dir ~/nanoclaw run chat"
     AITEXTAROO_API_KEY=YOUR_KEY aitextaroo-bridge
 """
 
@@ -15,9 +16,10 @@ import os
 import sys
 from pathlib import Path
 
-from aitextaroo.agents import BUILTIN_AGENTS, create_agent, detect_agents
+from aitextaroo.agents import BUILTIN_AGENTS, create_agent, custom_agent, detect_agents
 from aitextaroo.bridge import Bridge
 from aitextaroo.client import TextarooClient
+from aitextaroo.credentials import load_api_key
 
 DEFAULT_SESSIONS_DIR = Path.home() / ".aitextaroo" / "sessions"
 
@@ -27,11 +29,12 @@ def main() -> None:
     args = _parse_args()
     _configure_logging(args.verbose)
 
-    key = args.api_key or os.environ.get("AITEXTAROO_API_KEY", "")
+    key = load_api_key(args.api_key)
     if not key:
-        _exit_error("API key required. Use --api-key or set AITEXTAROO_API_KEY.")
-
-    agent_name = _resolve_agent(args.agent)
+        _exit_error(
+            "API key required. Use --api-key, set AITEXTAROO_API_KEY, "
+            "or run `aitextaroo-setup --save` once."
+        )
 
     # Session persistence
     sessions_dir: Path | None = None
@@ -40,7 +43,10 @@ def main() -> None:
 
     # Wire dependencies
     client = TextarooClient(api_key=key, base_url=args.base_url)
-    agent = create_agent(agent_name)
+    if args.agent_command:
+        agent = custom_agent(args.agent_command)
+    else:
+        agent = create_agent(_resolve_agent(args.agent))
     bridge = Bridge(
         client=client,
         agent=agent,
@@ -76,6 +82,14 @@ def _parse_args() -> argparse.Namespace:
         choices=["auto", *BUILTIN_AGENTS.keys()],
         default="auto",
         help="Which agent to use (default: auto-detect)",
+    )
+    parser.add_argument(
+        "--agent-command",
+        default="",
+        help=(
+            "Run any other CLI agent: a command line that takes the prompt as its "
+            "last argument and prints the reply (overrides --agent)"
+        ),
     )
     parser.add_argument(
         "--base-url",
@@ -119,6 +133,7 @@ def _resolve_agent(choice: str) -> str:
         _exit_error(
             "No supported AI agent found on PATH. Install one of:\n"
             + "".join(f"  - {name}\n" for name in BUILTIN_AGENTS)
+            + "or run any CLI agent with --agent-command \"<command> <args>\"."
         )
     print(f"Auto-detected agent: {agents[0]}")
     return agents[0]

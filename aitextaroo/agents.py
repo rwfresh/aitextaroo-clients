@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import shlex
 import shutil
+import tempfile
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
@@ -89,6 +92,10 @@ class CliAgentConfig:
         args: Arguments placed before the prompt.
         system_prompt: Context the bridge prepends to prompts.
         timeout: Max seconds to wait for a response.
+        output_flag: For CLIs that write their final answer to a file
+            (e.g. `codex exec -o FILE`): the flag that takes the path.
+            The reply is read from that file, so progress logs on stdout
+            never end up in a text message.
     """
 
     name: str
@@ -96,6 +103,10 @@ class CliAgentConfig:
     args: list[str] = field(default_factory=list)
     system_prompt: str = ""
     timeout: float = DEFAULT_TIMEOUT
+    output_flag: str | None = None
+    # False for CLIs whose binary name is ambiguous (e.g. Cursor's `agent`):
+    # they're only used when chosen explicitly with --agent.
+    auto_detect: bool = True
 
 
 class CliAgent(Agent):
@@ -129,8 +140,29 @@ class CliAgent(Agent):
 
     async def ask(self, text: str) -> str:
         """Spawn the agent CLI with the prompt and return its output."""
-        cmd = [self._config.command, *self._config.args, text]
+        if self._config.output_flag is None:
+            return await self._run([self._config.command, *self._config.args, text])
 
+        with tempfile.TemporaryDirectory(prefix="aitextaroo-") as tmp:
+            out_path = os.path.join(tmp, "reply.txt")
+            cmd = [
+                self._config.command,
+                *self._config.args,
+                self._config.output_flag,
+                out_path,
+                text,
+            ]
+            stdout = await self._run(cmd)
+            try:
+                with open(out_path, encoding="utf-8", errors="replace") as fh:
+                    from_file = fh.read().strip()
+            except OSError:
+                from_file = ""
+            return from_file or stdout
+
+    async def _run(self, cmd: list[str]) -> str:
+        """Run one agent process and return its stdout."""
+        text = cmd[-1]
         logger.debug("Running: %s %s '%s...'", cmd[0], " ".join(cmd[1:-1]), text[:40])
 
         process = await asyncio.create_subprocess_exec(
@@ -168,38 +200,98 @@ class CliAgent(Agent):
 # To add a new agent: add an entry here and it works automatically.
 # No other code changes needed.
 
+# Shared by every agent. Texts can't prove who sent them, and some CLIs
+# auto-approve their own tool calls in one-shot mode, so the prompt asks
+# for a PIN (or an in-app confirmation) before anything irreversible.
+SMS_SYSTEM_PROMPT = (
+    "You are replying to SMS text messages from your user through AI Text-a-roo. "
+    "Reply in plain text (no markdown), briefly: these are text messages with a "
+    "1600 character limit. A text can't prove who sent it, so before anything "
+    "sensitive or irreversible (spending money, messaging other people, deleting "
+    "or changing things) ask the user to text their security PIN and check it with "
+    "the aitextaroo verify_pin tool if you have it; otherwise ask them to confirm "
+    "in your own app instead of acting on the text alone."
+)
+
 BUILTIN_AGENTS: dict[str, CliAgentConfig] = {
     "claude": CliAgentConfig(
         name="Claude Code",
         command="claude",
         args=["-p"],
-        system_prompt=(
-            "You are receiving SMS text messages from a user. "
-            "Respond concisely — these are text messages with a 1600 character limit."
-        ),
+        system_prompt=SMS_SYSTEM_PROMPT,
+    ),
+    "codex": CliAgentConfig(
+        name="Codex",
+        command="codex",
+        # The bridge may run outside a git repo; colors would garble texts.
+        args=["exec", "--skip-git-repo-check", "--color", "never"],
+        output_flag="-o",
+        system_prompt=SMS_SYSTEM_PROMPT,
     ),
     "hermes": CliAgentConfig(
         name="Hermes",
         command="hermes",
-        args=["--pipe"],
-        system_prompt=(
-            "You are receiving SMS text messages from a user via AI Text-a-roo. "
-            "Respond conversationally. Keep responses concise — they're text messages."
-        ),
+        # -z/--oneshot prints only the final reply (no banner or spinner).
+        args=["-z"],
+        system_prompt=SMS_SYSTEM_PROMPT,
     ),
     "openclaw": CliAgentConfig(
         name="OpenClaw",
         command="openclaw",
-        args=["--pipe"],
-        system_prompt="You are receiving SMS text messages. Respond concisely.",
+        # Prints only the final assistant text; diagnostics go to stderr.
+        args=["agent", "exec"],
+        system_prompt=SMS_SYSTEM_PROMPT,
     ),
-    "nanoclaw": CliAgentConfig(
-        name="NanoClaw",
-        command="nanoclaw",
-        args=["--pipe"],
-        system_prompt="You are receiving SMS text messages. Respond concisely.",
+    "grok": CliAgentConfig(
+        name="Grok",
+        command="grok",
+        # -p/--single: one turn, response on stdout.
+        args=["--no-auto-update", "-p"],
+        system_prompt=SMS_SYSTEM_PROMPT,
+    ),
+    "gemini": CliAgentConfig(
+        name="Gemini CLI",
+        command="gemini",
+        args=["-p"],
+        system_prompt=SMS_SYSTEM_PROMPT,
+    ),
+    "antigravity": CliAgentConfig(
+        name="Antigravity CLI",
+        command="agy",
+        # Headless: the response on stdout, notices on stderr.
+        args=["-p"],
+        system_prompt=SMS_SYSTEM_PROMPT,
+    ),
+    "goose": CliAgentConfig(
+        name="Goose",
+        command="goose",
+        # -q prints only the model's response.
+        args=["run", "-q", "--no-session", "-t"],
+        system_prompt=SMS_SYSTEM_PROMPT,
+    ),
+    "cursor": CliAgentConfig(
+        name="Cursor CLI",
+        command="agent",
+        args=["-p", "--trust"],
+        system_prompt=SMS_SYSTEM_PROMPT,
+        # Grok Build also installs a binary called `agent`.
+        auto_detect=False,
     ),
 }
+
+
+def custom_agent(command_line: str, name: str = "Custom agent") -> CliAgent:
+    """Build an agent from a full command line, e.g. "pnpm --silent --dir ~/nanoclaw run chat".
+
+    The bridge appends the prompt as the last argument and reads stdout.
+    """
+    parts = shlex.split(command_line)
+    if not parts:
+        raise ValueError("Agent command is empty")
+    command = os.path.expanduser(parts[0])
+    args = [os.path.expanduser(p) for p in parts[1:]]
+    config = CliAgentConfig(name=name, command=command, args=args, system_prompt=SMS_SYSTEM_PROMPT)
+    return CliAgent(config)
 
 
 def detect_agents() -> list[str]:
@@ -210,7 +302,7 @@ def detect_agents() -> list[str]:
     """
     found = []
     for name, config in BUILTIN_AGENTS.items():
-        if shutil.which(config.command):
+        if config.auto_detect and shutil.which(config.command):
             found.append(name)
             logger.debug("Detected agent: %s (%s)", config.name, config.command)
     return found
