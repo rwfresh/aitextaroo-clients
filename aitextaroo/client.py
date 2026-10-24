@@ -46,6 +46,11 @@ MAX_WAIT_SECONDS = 120
 # Extra HTTP time on top of the wait so the server answers before we give up.
 WAIT_HTTP_MARGIN = 15.0
 
+# The API sends a keepalive on the stream at least every 20 seconds, so one
+# that's silent this long is dead (the computer slept, or a router dropped
+# the connection without a word): give up on it and reconnect.
+STREAM_READ_TIMEOUT = 90.0
+
 # Stream error events after which reconnecting can't help, so listen() raises
 # a TextarooError with that code instead. Reconnecting after "evicted" would
 # just knock the other stream off in turn, back and forth. Only programs
@@ -582,7 +587,8 @@ class TextarooClient:
         """Listen for inbound SMS messages via the SSE stream.
 
         Yields InboundMessage objects as they arrive. Handles
-        reconnection and Last-Event-ID replay automatically.
+        reconnection and Last-Event-ID replay automatically, including
+        after a stream that goes silent for STREAM_READ_TIMEOUT seconds.
 
         An account has one stream at a time: opening another one (from any
         of its keys) ends this one with "evicted".
@@ -629,7 +635,9 @@ class TextarooClient:
                             if event.error.retry_after:
                                 delay = float(event.error.retry_after)
 
-            except (httpx.RemoteProtocolError, httpx.ReadError, httpx.ConnectError) as exc:
+            # Every network failure, read timeouts included (ReadTimeout
+            # isn't a ReadError): the connection is gone, so reconnect.
+            except httpx.TransportError as exc:
                 logger.warning("Stream disconnected: %s", type(exc).__name__)
 
             except httpx.HTTPStatusError as exc:
@@ -666,7 +674,8 @@ class TextarooClient:
             "GET",
             "/v1/stream",
             headers=headers,
-            timeout=None,  # Long-lived connection
+            # Long-lived, but never waiting forever on a dead connection.
+            timeout=httpx.Timeout(30.0, read=STREAM_READ_TIMEOUT),
         ) as response:
             response.raise_for_status()
 

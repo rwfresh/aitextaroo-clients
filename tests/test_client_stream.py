@@ -7,9 +7,10 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from aitextaroo.client import STREAM_STOPS, TextarooClient, TextarooError
+from aitextaroo.client import STREAM_READ_TIMEOUT, STREAM_STOPS, TextarooClient, TextarooError
 
 CONNECTED = ("connected", None, {"user_id": "u1", "assigned_number": "+15551110000"})
+SSE_HEADERS = {"content-type": "text/event-stream"}
 
 
 def _message(msg_id: str, text: str) -> tuple[str, str, dict]:
@@ -20,16 +21,30 @@ def _error(code: str, message: str = "server says") -> tuple[str, None, dict]:
     return ("error", None, {"code": code, "message": message})
 
 
-def _sse(*events: tuple[str, str | None, dict]) -> httpx.Response:
-    """One stream connection's worth of SSE events, then the server hangs up."""
+def _sse_body(*events: tuple[str, str | None, dict]) -> bytes:
     lines = []
     for name, event_id, data in events:
         lines.append(f"event: {name}")
         if event_id:
             lines.append(f"id: {event_id}")
         lines.append(f"data: {json.dumps(data)}\n")
-    body = "\n".join(lines) + "\n"
-    return httpx.Response(200, content=body.encode(), headers={"content-type": "text/event-stream"})
+    return ("\n".join(lines) + "\n").encode()
+
+
+def _sse(*events: tuple[str, str | None, dict]) -> httpx.Response:
+    """One stream connection's worth of SSE events, then the server hangs up."""
+    return httpx.Response(200, content=_sse_body(*events), headers=SSE_HEADERS)
+
+
+class _GoesSilent(httpx.AsyncByteStream):
+    """A stream connection that sends these bytes, then nothing until the read times out."""
+
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+
+    async def __aiter__(self):
+        yield self._body
+        raise httpx.ReadTimeout("nothing for too long")
 
 
 def _streaming_client(*responses: httpx.Response) -> tuple[TextarooClient, list[httpx.Request]]:
@@ -133,13 +148,41 @@ class TestStreamReconnects:
         await client.close()
 
     @pytest.mark.asyncio
-    async def test_dropped_connection_reconnects(self, sleep) -> None:
-        responses = iter(
-            [
-                httpx.ConnectError("connection refused"),
-                _sse(CONNECTED, _message("m1", "back"), _error("evicted")),
-            ]
+    async def test_a_stream_that_goes_silent_reconnects(self, sleep) -> None:
+        # After sleep/wake or a dropped NAT mapping no error ever arrives, and
+        # the API's keepalives (at least every 20 s) just stop: only the read
+        # timeout notices, and then listen() reconnects.
+        silent = httpx.Response(
+            200,
+            stream=_GoesSilent(_sse_body(CONNECTED, _message("m1", "before"))),
+            headers=SSE_HEADERS,
         )
+        client, seen = _streaming_client(
+            silent, _sse(CONNECTED, _message("m2", "after"), _error("credential_revoked"))
+        )
+        texts, error = await _collect(client)
+        assert texts == ["before", "after"]
+        assert error is not None
+        assert error.code == "credential_revoked"
+        assert len(seen) == 2
+        assert seen[0].extensions["timeout"]["read"] == STREAM_READ_TIMEOUT == 90.0
+        assert seen[1].headers["Last-Event-ID"] == "m1"
+        sleep.assert_awaited_once()
+        await client.close()
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            httpx.ConnectError("connection refused"),
+            httpx.ConnectTimeout("no answer"),
+            httpx.ReadTimeout("nothing for too long"),
+            httpx.RemoteProtocolError("peer closed connection"),
+        ],
+        ids=lambda exc: type(exc).__name__,
+    )
+    @pytest.mark.asyncio
+    async def test_dropped_connection_reconnects(self, sleep, failure) -> None:
+        responses = iter([failure, _sse(CONNECTED, _message("m1", "back"), _error("evicted"))])
         seen: list[httpx.Request] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
