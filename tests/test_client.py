@@ -330,6 +330,28 @@ class TestConfirmVerification:
         assert exc_info.value.code == "validation_error"
         assert exc_info.value.message.startswith("label: ")
 
+    @pytest.mark.asyncio
+    async def test_base_url_is_still_the_third_argument(self) -> None:
+        # 0.2.x callers wrote confirm_verification(phone, code, base_url). The
+        # phone and code must still go to that server (staging, say), not to
+        # production.
+        transport = _mock_transport(200, '{"api_key": "k"}')
+        async with httpx.AsyncClient(transport=transport, base_url="https://test.com") as client:
+            with patch("aitextaroo.client.httpx.AsyncClient") as mock_cls:
+                mock_cls.return_value.__aenter__ = AsyncMock(return_value=client)
+                mock_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+                await TextarooClient.confirm_verification(
+                    "+12125551234", "123456", "https://staging.example"
+                )
+        assert mock_cls.call_args.kwargs["base_url"] == "https://staging.example"
+
+    @pytest.mark.asyncio
+    async def test_label_goes_by_name_only(self) -> None:
+        with pytest.raises(TypeError):
+            await TextarooClient.confirm_verification(
+                "+12125551234", "123456", "https://staging.example", "Bridge on studio-mac"
+            )
+
 
 class TestSend:
     @pytest.mark.asyncio

@@ -254,8 +254,9 @@ class TextarooClient:
     async def confirm_verification(
         phone: str,
         code: str,
-        label: str | None = None,
         base_url: str = DEFAULT_BASE_URL,
+        *,
+        label: str | None = None,
     ) -> dict[str, Any]:
         """Confirm verification code and receive API key (step 2 of signup).
 
@@ -271,10 +272,10 @@ class TextarooClient:
         Args:
             phone: Same phone number used in request_verification.
             code: The 6-digit code received via SMS.
-            label: A name for the key, shown on the dashboard and in the
-                owner's text: 1–40 letters, digits, spaces or . _ ( ) ' @ # : + -
-                (the API's default is "API key").
-            base_url: API base URL.
+            base_url: API base URL (the third argument, as in 0.2.x).
+            label: Keyword only. A name for the key, shown on the dashboard
+                and in the owner's text: 1–40 letters, digits, spaces or
+                . _ ( ) ' @ # : + - (the API's default is "API key").
 
         Returns:
             {"status": "verified", "api_key": "...", "key_id": "key_<uuid>",
