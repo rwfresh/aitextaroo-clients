@@ -1,0 +1,15 @@
+{
+  "name": "aitextaroo",
+  "description": "AI Text-a-roo: SMS for AI agents",
+  "owner": {
+    "name": "AI Text-a-roo",
+    "email": "hello@aitextaroo.com"
+  },
+  "plugins": [
+    {
+      "name": "aitextaroo",
+      "source": "./",
+      "description": "Give your AI agent a phone number: text your user, wait for their reply, and text their contacts (SMS) via AI Text-a-roo."
+    }
+  ]
+}

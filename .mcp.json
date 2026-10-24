@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "aitextaroo": {
+      "type": "http",
+      "url": "https://api.aitextaroo.com/mcp"
+    }
+  }
+}

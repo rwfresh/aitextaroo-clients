@@ -1,118 +1,107 @@
 # AI Text-a-roo
 
-Give any AI agent a phone number. In 60 seconds.
+Give any AI agent a phone number, in about two minutes.
 
-```
-pip install aitextaroo
-```
+[AI Text-a-roo](https://aitextaroo.com) is an SMS gateway for AI agents. You verify your
+phone once; then you can text your agent from any phone (no app), and it can text you back,
+or first, when something needs you. This repo has everything an agent needs to use it: an
+[Agent Skill](skills/aitextaroo/SKILL.md), plugin manifests for Claude, Codex, Cursor and
+Gemini CLI, the `aitextaroo` command, a Python SDK, and an SMS bridge for CLI agents.
 
-## What is this?
+## Install in your agent
 
-[AI Text-a-roo](https://aitextaroo.com) is an SMS gateway for AI agents. You sign up, get a phone number, and your agent can send and receive text messages.
+| Agent | One step |
+|---|---|
+| Claude Code | `/plugin install aitextaroo --marketplace rwfresh/aitextaroo-clients` |
+| Claude, Claude Desktop, Claude Duet | Customize → Plugins → Add marketplace → `rwfresh/aitextaroo-clients`, or Customize → Connectors → Add custom connector → `https://api.aitextaroo.com/mcp` |
+| ChatGPT and Dots | Plugins → + → Add custom MCP server → `https://api.aitextaroo.com/mcp` → OAuth |
+| Codex | `codex plugin marketplace add rwfresh/aitextaroo-clients`, then `codex plugin add aitextaroo@aitextaroo` |
+| Gemini CLI | `gemini extensions install https://github.com/rwfresh/aitextaroo-clients` |
+| Grok Bot | Say: "Add a custom MCP server called AI Text-a-roo at https://api.aitextaroo.com/mcp" |
+| Cursor | Add the MCP server to `~/.cursor/mcp.json` (run `aitextaroo connect cursor`) |
+| Any skills-aware agent | `npx skills add rwfresh/aitextaroo-clients` |
+| Claude Code, Codex, Hermes, OpenClaw, Grok, Gemini, Goose (answer texts from your phone) | `pipx install aitextaroo`, then `aitextaroo-bridge` |
 
-This library connects your agent to the gateway. No webhook, no public IP, no server setup — just one outbound HTTPS connection.
+The plugins bundle the skill and the remote MCP server. They sign in with OAuth: you enter
+your phone number and the 6-digit code we text you, so there's no API key to copy. Setup
+guides for each agent: <https://aitextaroo.com/agents>.
 
-## Setup
+Or just tell your agent:
 
-### Let your agent do it
+> Set me up with AI Text-a-roo so I can text you. Instructions: aitextaroo.com/llms.txt
 
-Tell your agent:
-
-> Go to aitextaroo.com and set up SMS for me.
-
-Your agent will find the setup instructions and handle everything.
-
-### Or use the CLI
+## Quick start from a terminal
 
 ```bash
-# 1. Install (pipx recommended — handles modern Linux PEP 668)
-pipx install aitextaroo
-
-# Or with pip:
-pip install --user aitextaroo
-
-# 2. Verify your phone (sends a 6-digit code)
-aitextaroo-setup --phone +12125551234
-
-# 3. Enter the code, get your API key
-aitextaroo-setup --phone +12125551234 --code 123456
-
-# 4. Start the bridge
-aitextaroo-bridge --api-key YOUR_KEY
+pipx install aitextaroo                                      # or: pip install --user aitextaroo
+aitextaroo-setup --phone +12125551234                        # texts you a 6-digit code
+aitextaroo-setup --phone +12125551234 --code 123456 --save   # saves the key (owner-only)
+aitextaroo send "Hello from my agent!"
 ```
 
-The bridge auto-detects your AI agent and starts piping SMS through it.
+`--save` stores the API key in `~/.aitextaroo/credentials.json` with owner-only permissions.
+`aitextaroo` and `aitextaroo-bridge` find it there, or in `AITEXTAROO_API_KEY`, or in `--api-key`.
 
-Supported agents: `claude` (Claude Code), `hermes`, `openclaw`, `nanoclaw`.
+## The `aitextaroo` command
 
-## How it works
+Made for agents with a shell. Output is JSON; errors go to stderr with exit code 1.
 
+```bash
+aitextaroo send "Build finished: 318 tests passing."
+aitextaroo ask "Deploy to production? Reply YES or NO" --timeout 120   # text, then wait for the answer
+aitextaroo wait --timeout 60                                            # wait for the next text
+aitextaroo recent                                                       # texts from the last 5 minutes
+aitextaroo relay --to +12125550100 --name Mom "Happy birthday!"        # Pro: text a contact
+aitextaroo verify-pin 4821                                              # check a PIN the user texted
+aitextaroo account
+aitextaroo upgrade                                                      # Stripe link for Pro
+aitextaroo webhook set https://example.com/hook --auth-header "Bearer <token>"
+aitextaroo connect [claude-code|codex|gemini|cursor|muse-code|claude|chatgpt|grok]
 ```
-Your phone                AI Text-a-roo              Your machine
-    │                         │                          │
-    ├── SMS "hey" ──────────► │                          │
-    │                         ├── SSE stream ──────────► │
-    │                         │                          ├── Agent processes
-    │                         │   POST /v1/send ◄────────┤   the message
-    │  ◄── SMS "hello!" ──────┤                          │
-    │                         │                          │
+
+## SMS bridge
+
+The bridge holds one outbound connection to AI Text-a-roo. Each text you send becomes a
+prompt for a CLI agent on your machine, and its answer is texted back. No webhook, no public
+IP: it works behind NAT, firewalls and VPNs.
+
+```bash
+aitextaroo-bridge                       # auto-detects an installed agent
+aitextaroo-bridge --agent codex
+aitextaroo-bridge --agent-command "pnpm --silent --dir ~/nanoclaw run chat"   # any other CLI
 ```
 
-1. User texts your assigned number
-2. AI Text-a-roo pushes the message via SSE (Server-Sent Events)
-3. Your agent processes it and replies via `client.send()`
-4. The reply is delivered as SMS
+| `--agent` | Runs |
+|---|---|
+| `claude` | `claude -p "<prompt>"` |
+| `codex` | `codex exec --skip-git-repo-check -o <file> "<prompt>"` |
+| `hermes` | `hermes -z "<prompt>"` |
+| `openclaw` | `openclaw agent exec "<prompt>"` |
+| `grok` | `grok -p "<prompt>"` |
+| `gemini` | `gemini -p "<prompt>"` |
+| `antigravity` | `agy -p "<prompt>"` |
+| `goose` | `goose run -q --no-session -t "<prompt>"` |
+| `cursor` | `agent -p --trust "<prompt>"` (explicit only; Grok also installs an `agent` binary) |
 
-No polling. No webhooks. No public IP. Works behind NAT, firewalls, VPNs.
+Auto-detect tries them in this order. `--agent-command` runs any CLI that takes the prompt
+as its last argument and prints the reply.
 
-## Features
+Conversation history is saved locally in `~/.aitextaroo/sessions/` and survives restarts.
+Text `/help`, `/new` (fresh conversation) or `/status`. Use `--no-persist` for memory-only
+history. Responses are stripped of markdown for SMS.
 
-### Conversation history
+```text
+aitextaroo-bridge [OPTIONS]
+  --api-key KEY          API key (default: AITEXTAROO_API_KEY or the saved credentials)
+  --agent NAME           auto, claude, codex, hermes, openclaw, grok, gemini, antigravity, goose, cursor
+  --agent-command CMD    Any other CLI agent (overrides --agent)
+  --sessions-dir PATH    Session files (default ~/.aitextaroo/sessions/)
+  --no-persist           Keep history in memory only
+  --base-url URL         Custom API URL
+  -v, --verbose          Debug logging
+```
 
-The bridge keeps conversation context so your agent can have coherent
-multi-turn conversations over SMS. History is saved to local JSONL files
-(`~/.aitextaroo/sessions/`) and survives bridge restarts.
-
-- Bridge restart → picks up where you left off
-- `/new` → starts a fresh session (old one is saved on disk)
-- `--no-persist` → in-memory only, history gone when bridge stops
-- Nothing is stored on our servers — files live on your machine only
-
-### Third-party relay (Pro plan)
-
-Your agent can text anyone on your behalf. Replies get forwarded to your
-phone. Reply with `>` to respond through your agent's number.
-
-### SMS formatting
-
-Agent responses are automatically cleaned for SMS — markdown bold,
-italic, code blocks, and headers are stripped to plain text.
-
-### SMS commands
-
-Your user can text these commands:
-
-| Command   | What it does                                        |
-|-----------|-----------------------------------------------------|
-| `/help`   | List available commands                             |
-| `/new`    | Start a new conversation (old one is saved)         |
-| `/status` | Show agent name, uptime, session info, message count |
-
-## Plans
-
-| Feature              | Free ($0)  | Pro ($5/mo)              |
-|----------------------|------------|--------------------------|
-| Messages/day         | 10         | 200                      |
-| 2-way conversations  | ✓          | ✓                        |
-| Security PIN         | ✓          | ✓                        |
-| Relay to contacts    | —          | ✓                        |
-| Reply forwarding     | —          | ✓                        |
-
-14-day free trial on Pro. Cancel anytime.
-
-## Python API
-
-### TextarooClient
+## Python SDK
 
 ```python
 import asyncio
@@ -120,80 +109,73 @@ from aitextaroo import TextarooClient
 
 async def main():
     client = TextarooClient(api_key="YOUR_KEY")
-
-    async for message in client.listen():
-        print(f"Got: {message.text}")
-        await client.send(f"You said: {message.text}")
+    await client.send("All tests pass. Open a PR? Reply YES or NO.")
+    reply = await client.wait_for_reply(timeout_seconds=90)
+    print(reply.text if reply else "No answer yet")
+    await client.close()
 
 asyncio.run(main())
 ```
 
-#### `listen(auto_reconnect=True)` → `AsyncIterator[InboundMessage]`
+| Method | What it does |
+|---|---|
+| `send(text)` | Text the user. Returns the message ID. |
+| `wait_for_reply(timeout_seconds=60)` | Wait up to 120 s for the user's next text (or one that arrived since your last send). Returns an `InboundMessage` or `None`. |
+| `recent_messages(after_id=None)` | Texts from the last five minutes. |
+| `listen()` | Async iterator over inbound texts via SSE, with automatic reconnect and replay. |
+| `text_contact(to, text, recipient_name=None)` | Pro: text someone else; their replies go to the user's phone. |
+| `verify_pin(pin)` | Check a PIN the user texted: `{"verified": bool, "attempts_remaining": int \| None}`. |
+| `set_webhook(url, auth_header=None)` / `remove_webhook()` | Forward inbound texts to a URL (signed with `X-Signature`). |
+| `account()` | Plan, assigned number, usage and daily limit. |
+| `upgrade_link()` | Stripe checkout link for Pro. |
+| `TextarooClient.request_verification(phone)` / `confirm_verification(phone, code)` | Sign-up, no key needed. |
 
-Opens an SSE stream and yields messages as they arrive. Handles reconnection automatically.
+`InboundMessage` has `id`, `text`, `received_at`, `channel` (`"sms"`), `trust_level` and
+`has_pin`. See [`examples/`](examples/) for an echo bot, a listener and an ask-and-wait flow.
 
-#### `send(text)` → `str`
+## MCP server
 
-Send an SMS to the registered user. Returns the message ID.
+`https://api.aitextaroo.com/mcp` (streamable HTTP). Tools: `send_text`, `wait_for_reply`,
+`get_recent_messages`, `text_contact`, `verify_pin`, `get_account`, `get_upgrade_link`.
+Clients sign in with OAuth, or send `Authorization: Bearer <API key>`:
 
-#### `account()` → `dict`
-
-Get account info (tier, assigned number, usage).
-
-#### `close()`
-
-Release resources.
-
-### Signup API (static methods)
-
-```python
-# Send verification code
-await TextarooClient.request_verification(phone="+12125551234")
-
-# Confirm and get API key
-result = await TextarooClient.confirm_verification(phone="+12125551234", code="123456")
-print(result["api_key"])
-print(result["assigned_number"])
+```bash
+claude mcp add --transport http --scope user aitextaroo https://api.aitextaroo.com/mcp \
+  --header "Authorization: Bearer $AITEXTAROO_API_KEY"
 ```
 
-### InboundMessage
+Run `aitextaroo connect` for every client's exact setup. Reference: <https://aitextaroo.com/docs/mcp>.
 
-| Field         | Type   | Description              |
-|---------------|--------|--------------------------|
-| `id`          | `str`  | Unique message ID (UUID) |
-| `text`        | `str`  | Message body             |
-| `received_at` | `str`  | ISO 8601 timestamp       |
-| `channel`     | `str`  | Always `"sms"`           |
-| `trust_level` | `str`  | `"low"`, `"medium"`, or `"high"` (PIN verified) |
-| `has_pin`     | `bool` | Whether sender has a PIN set |
+## Plans
 
-## CLI Reference
+| | Free ($0) | Pro ($5/mo, 14-day free trial) |
+|---|---|---|
+| Messages per day | 10 | 200 |
+| Two-way texting, MCP, skill, SDK, bridge | ✓ | ✓ |
+| Security PIN | ✓ | ✓ |
+| Text your contacts, with replies forwarded | | ✓ |
 
-```text
-aitextaroo-bridge [OPTIONS]
+Up to 5 texts per minute. Limits reset at midnight UTC.
 
-Options:
-  --api-key KEY          API key (or set AITEXTAROO_API_KEY)
-  --agent NAME           Agent: auto, claude, hermes, openclaw, nanoclaw
-  --sessions-dir PATH    Session file directory (default: ~/.aitextaroo/sessions/)
-  --no-persist           Disable session persistence (in-memory only)
-  --base-url URL         Custom API URL
-  -v, --verbose          Debug logging
-```
+## Privacy and security
 
-## Privacy
+- Message content is never written to AI Text-a-roo's database. Texts are held in memory
+  for at most five minutes so an agent can catch up after a dropped connection.
+- Phone numbers are encrypted at rest; PINs are stored as bcrypt hashes.
+- The bridge's history and the saved credentials live only on your machine.
+- SMS isn't end-to-end encrypted, and sender IDs can be spoofed. The bridge tells every agent
+  to ask for your PIN before anything sensitive, because some CLIs (for example `hermes -z`)
+  auto-approve their own tool calls in one-shot mode. Run the bridge with an agent whose
+  permissions you're comfortable exposing to your phone number.
 
-- Messages pass through and disappear — nothing is stored on our servers
-- Conversation history is saved as local files on your machine only
-- Your phone number is hashed and encrypted at rest
-- Session files are plain JSONL — inspect or delete them anytime
+Details: <https://aitextaroo.com/security>.
 
-## Environment Variables
+## Environment variables
 
-| Variable              | Description                              |
-|-----------------------|------------------------------------------|
-| `AITEXTAROO_API_KEY`  | Your API key (alternative to `--api-key`) |
-| `AITEXTAROO_BASE_URL` | Custom API URL (for self-hosted)          |
+| Variable | Description |
+|---|---|
+| `AITEXTAROO_API_KEY` | API key (alternative to `--api-key` and the saved credentials) |
+| `AITEXTAROO_BASE_URL` | Custom API URL |
 
 ## License
 
