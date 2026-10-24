@@ -182,6 +182,13 @@ Details: <https://aitextaroo.com/security>.
 | `AITEXTAROO_API_KEY` | API key (alternative to `--api-key` and the saved credentials) |
 | `AITEXTAROO_BASE_URL` | Custom API URL |
 
+## Releasing
+
+Bump `version` in `pyproject.toml` and `__version__` in `aitextaroo/__init__.py`, merge to
+`main`, then push a matching tag: `git tag v0.2.1 && git push origin v0.2.1`. The
+[Release workflow](.github/workflows/release.yml) tests, builds and publishes to PyPI with
+Trusted Publishing.
+
 ## License
 
 MIT
