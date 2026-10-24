@@ -4,6 +4,7 @@ import json
 import stat
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 
 from aitextaroo import agent_cli
@@ -36,6 +37,44 @@ class TestCredentials:
         bad = tmp_path / "bad.json"
         bad.write_text("not json")
         assert load_api_key(path=bad) == ""
+
+    def test_overwriting_a_loose_file_leaves_it_owner_only(self, tmp_path) -> None:
+        folder = tmp_path / "creds"
+        folder.mkdir(mode=0o755)
+        folder.chmod(0o755)
+        path = folder / "credentials.json"
+        path.write_text('{"api_key": "old"}')
+        path.chmod(0o644)
+        # Anyone who opened the old world-readable file must never see the new key.
+        with path.open() as opened_earlier:
+            save_credentials("new_key", path=path)
+            assert "new_key" not in opened_earlier.read()
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(folder.stat().st_mode) == 0o700
+        assert load_credentials(path)["api_key"] == "new_key"
+        assert [p.name for p in folder.iterdir()] == ["credentials.json"]  # no temp file left
+
+    def test_symlink_is_replaced_not_followed(self, tmp_path) -> None:
+        victim = tmp_path / "victim.txt"
+        victim.write_text("do not touch")
+        folder = tmp_path / "creds"
+        folder.mkdir()
+        link = folder / "credentials.json"
+        link.symlink_to(victim)
+        save_credentials("key_123", path=link)
+        assert victim.read_text() == "do not touch"
+        assert not link.is_symlink()
+        assert stat.S_IMODE(link.stat().st_mode) == 0o600
+        assert load_credentials(link)["api_key"] == "key_123"
+
+    def test_failed_write_leaves_no_temp_file(self, tmp_path) -> None:
+        folder = tmp_path / "creds"
+        with (
+            patch("aitextaroo.credentials.os.replace", side_effect=OSError("disk full")),
+            pytest.raises(OSError, match="disk full"),
+        ):
+            save_credentials("key_123", path=folder / "credentials.json")
+        assert list(folder.iterdir()) == []
 
 
 def _run_cli(argv: list[str], capsys) -> dict:
@@ -119,6 +158,48 @@ class TestCommands:
             agent_cli.main(["--api-key", "k", "send", "Hi"])
         assert exc_info.value.code == 1
         assert "daily_limit_reached" in capsys.readouterr().err
+
+    def test_verify_pin_match_exits_zero(self, capsys) -> None:
+        client = self._client()
+        client.verify_pin.return_value = {"verified": True, "attempts_remaining": None}
+        with patch.object(agent_cli, "TextarooClient", return_value=client):
+            out = _run_cli(["--api-key", "k", "verify-pin", "4821"], capsys)
+        assert out["verified"] is True
+
+    def test_wrong_pin_exits_2_after_printing_the_result(self, capsys) -> None:
+        # So `aitextaroo verify-pin 1234 && do-something` stops on a wrong PIN.
+        client = self._client()
+        client.verify_pin.return_value = {"verified": False, "attempts_remaining": 2}
+        with (
+            patch.object(agent_cli, "TextarooClient", return_value=client),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            agent_cli.main(["--api-key", "k", "verify-pin", "1234"])
+        assert exc_info.value.code == 2
+        assert json.loads(capsys.readouterr().out) == {"verified": False, "attempts_remaining": 2}
+
+    @pytest.mark.parametrize(
+        ("error", "expected"),
+        [
+            (httpx.ConnectError("[Errno 111] Connection refused"), "Connection refused"),
+            (httpx.ReadTimeout(""), "ReadTimeout"),
+            (OSError("Network is unreachable"), "Network is unreachable"),
+        ],
+    )
+    def test_network_error_is_one_line_not_a_traceback(self, capsys, error, expected) -> None:
+        client = self._client()
+        client.send.side_effect = error
+        with (
+            patch.object(agent_cli, "TextarooClient", return_value=client),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            agent_cli.main(["--api-key", "k", "send", "Hi"])
+        assert exc_info.value.code == 1
+        err = capsys.readouterr().err
+        assert err.startswith("Error: Network error reaching https://api.aitextaroo.com")
+        assert expected in err
+        assert err.count("\n") == 1
+        client.close.assert_awaited_once()
 
     def test_missing_key(self, capsys, monkeypatch) -> None:
         monkeypatch.delenv("AITEXTAROO_API_KEY", raising=False)

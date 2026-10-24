@@ -1,12 +1,17 @@
 """Tests for agent abstraction and CLI agent."""
 
 import asyncio
+import os
+import subprocess
+import sys
 from unittest.mock import patch
 
 import pytest
 
+from aitextaroo import cli
 from aitextaroo.agents import (
     BUILTIN_AGENTS,
+    VERSION_CHECK_TIMEOUT,
     Agent,
     CliAgent,
     CliAgentConfig,
@@ -14,6 +19,20 @@ from aitextaroo.agents import (
     custom_agent,
     detect_agents,
 )
+
+
+@pytest.fixture
+def open_stdin():
+    """Make fd 0 a pipe that nobody writes to or closes, as under a supervisor."""
+    read_fd, write_fd = os.pipe()
+    saved = os.dup(0)
+    os.dup2(read_fd, 0)
+    try:
+        yield
+    finally:
+        os.dup2(saved, 0)
+        for fd in (saved, read_fd, write_fd):
+            os.close(fd)
 
 
 class TestCliAgentConfig:
@@ -50,6 +69,17 @@ class TestCliAgent:
         agent = CliAgent(config)
         result = await agent.ask("echo output; exit 1")
         assert result == "output"
+
+    @pytest.mark.asyncio
+    async def test_agent_does_not_inherit_stdin(self, open_stdin) -> None:
+        # Like `codex exec`, this CLI also reads stdin. Given the bridge's own
+        # stdin (a pipe that never closes under a supervisor), it would hang.
+        # (`read` is a bash builtin, so a timeout kill leaves no child behind.)
+        script = 'IFS= read -r piped; echo "prompt=$1 stdin=$piped"'
+        config = CliAgentConfig(
+            name="StdinReader", command="bash", args=["-c", script, "_"], timeout=3
+        )
+        assert await CliAgent(config).ask("hi") == "prompt=hi stdin="
 
     def test_name_property(self) -> None:
         config = CliAgentConfig(name="My Agent", command="test")
@@ -172,3 +202,77 @@ class TestCustomAndAmbiguousAgents:
     def test_custom_agent_rejects_empty(self) -> None:
         with pytest.raises(ValueError):
             custom_agent("   ")
+
+
+def _on_path(*names: str):
+    """A shutil.which stand-in that finds only the given binaries."""
+    return lambda cmd: f"/usr/bin/{cmd}" if cmd in names else None
+
+
+def _version(stdout: str) -> subprocess.CompletedProcess:
+    return subprocess.CompletedProcess(["agent", "--version"], 0, stdout=stdout, stderr="")
+
+
+GROK_VERSION = "grok 1.0.34 (3736acbc8658) [stable]\n"
+
+
+class TestCursorBinary:
+    """`agent` may be Grok Build's binary rather than Cursor's."""
+
+    def test_prefers_cursor_agent(self) -> None:
+        with (
+            patch("aitextaroo.agents.shutil.which", _on_path("cursor-agent", "agent")),
+            patch("aitextaroo.agents.subprocess.run") as run,
+        ):
+            agent = create_agent("cursor")
+        assert agent._config.command == "cursor-agent"
+        assert agent._config.args == ["-p", "--trust"]
+        run.assert_not_called()
+
+    def test_refuses_an_agent_binary_that_is_grok(self) -> None:
+        with (
+            patch("aitextaroo.agents.shutil.which", _on_path("agent")),
+            patch("aitextaroo.agents.subprocess.run", return_value=_version(GROK_VERSION)) as run,
+            pytest.raises(ValueError, match=r"not Cursor CLI.*grok 1\.0\.34.*cursor-agent"),
+        ):
+            create_agent("cursor")
+        run.assert_called_once()
+        assert run.call_args.args[0] == ["agent", "--version"]
+        assert run.call_args.kwargs["timeout"] == VERSION_CHECK_TIMEOUT
+
+    def test_uses_agent_when_it_is_cursor(self) -> None:
+        with (
+            patch("aitextaroo.agents.shutil.which", _on_path("agent")),
+            patch("aitextaroo.agents.subprocess.run", return_value=_version("2026.10.01-1a2b3c\n")),
+        ):
+            assert create_agent("cursor")._config.command == "agent"
+
+    @pytest.mark.parametrize(
+        "error", [subprocess.TimeoutExpired(["agent", "--version"], 5), OSError("exec format")]
+    )
+    def test_unanswered_version_check_does_not_block(self, error) -> None:
+        with (
+            patch("aitextaroo.agents.shutil.which", _on_path("agent")),
+            patch("aitextaroo.agents.subprocess.run", side_effect=error),
+        ):
+            assert create_agent("cursor")._config.command == "agent"
+
+    def test_other_agents_skip_the_check(self) -> None:
+        with (
+            patch("aitextaroo.agents.shutil.which", _on_path("claude", "agent")),
+            patch("aitextaroo.agents.subprocess.run") as run,
+        ):
+            assert create_agent("claude")._config.command == "claude"
+        run.assert_not_called()
+
+    def test_bridge_exits_with_the_error(self, capsys, monkeypatch) -> None:
+        argv = ["aitextaroo-bridge", "--api-key", "k", "--agent", "cursor"]
+        monkeypatch.setattr(sys, "argv", argv)
+        with (
+            patch("aitextaroo.agents.shutil.which", _on_path("agent")),
+            patch("aitextaroo.agents.subprocess.run", return_value=_version(GROK_VERSION)),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            cli.main()
+        assert exc_info.value.code == 1
+        assert "not Cursor CLI" in capsys.readouterr().err

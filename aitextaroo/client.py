@@ -57,10 +57,13 @@ class TextarooError(Exception):
 def _parse_json_response(response: httpx.Response, fallback_message: str) -> dict:
     """Parse a JSON API response, raising TextarooError on failure.
 
-    Handles three failure modes that response.json() alone does not:
+    Handles four failure modes that response.json() alone does not:
     1. Empty response body (e.g., 502 from a gateway/proxy)
     2. Non-JSON response body (e.g., HTML error page)
     3. API error envelope ({"error": {"code": ..., "message": ...}})
+    4. FastAPI errors: {"detail": "message"} (code "http_<status>") and
+       422 validation errors {"detail": [{"loc": [...], "msg": ...}]}
+       (code "validation_error")
 
     Args:
         response: The httpx Response object.
@@ -91,7 +94,7 @@ def _parse_json_response(response: httpx.Response, fallback_message: str) -> dic
         if not isinstance(error, dict) and isinstance(detail, dict):
             error = detail.get("error")
         if not isinstance(error, dict):
-            error = {}
+            error = _error_from_detail(detail, response.status_code)
         raise TextarooError(
             code=error.get("code", "unknown"),
             message=error.get("message", fallback_message),
@@ -106,6 +109,35 @@ def _parse_json_response(response: httpx.Response, fallback_message: str) -> dic
         )
 
     return data
+
+
+# Where FastAPI says a request field lives; the first entry of a validation "loc".
+_REQUEST_PARTS = frozenset({"body", "query", "path", "header", "cookie"})
+
+
+def _error_from_detail(detail: Any, status_code: int) -> dict[str, str]:
+    """Turn a FastAPI-style "detail" into an error envelope ({} if unusable).
+
+    {"detail": "Already subscribed to Pro"} keeps the message, with code
+    "http_<status>". A 422 validation error,
+    {"detail": [{"loc": ["body", "phone"], "msg": "Field required"}, ...]},
+    becomes code "validation_error" with the first problem: "phone: Field required".
+    """
+    if isinstance(detail, str) and detail:
+        return {"code": f"http_{status_code}", "message": detail}
+    if not (isinstance(detail, list) and detail and isinstance(detail[0], dict)):
+        return {}
+    first = detail[0]
+    message = first.get("msg")
+    if not isinstance(message, str) or not message:
+        return {"code": "validation_error"}
+    loc = first.get("loc")
+    parts = [str(part) for part in loc] if isinstance(loc, list) else []
+    if parts and parts[0] in _REQUEST_PARTS:
+        parts = parts[1:]
+    if parts:
+        message = f"{'.'.join(parts)}: {message}"
+    return {"code": "validation_error", "message": message}
 
 
 class TextarooClient:

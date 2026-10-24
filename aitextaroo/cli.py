@@ -42,11 +42,14 @@ def main() -> None:
         sessions_dir = Path(args.sessions_dir).expanduser()
 
     # Wire dependencies
+    try:
+        if args.agent_command:
+            agent = custom_agent(args.agent_command)
+        else:
+            agent = create_agent(_resolve_agent(args.agent))
+    except ValueError as exc:
+        _exit_error(str(exc))
     client = TextarooClient(api_key=key, base_url=args.base_url)
-    if args.agent_command:
-        agent = custom_agent(args.agent_command)
-    else:
-        agent = create_agent(_resolve_agent(args.agent))
     bridge = Bridge(
         client=client,
         agent=agent,

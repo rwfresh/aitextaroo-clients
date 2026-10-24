@@ -12,7 +12,7 @@ Gemini CLI, the `aitextaroo` command, a Python SDK, and an SMS bridge for CLI ag
 
 | Agent | One step |
 |---|---|
-| Claude Code | `/plugin install aitextaroo --marketplace rwfresh/aitextaroo-clients` |
+| Claude Code | `claude plugin install aitextaroo --marketplace rwfresh/aitextaroo-clients`, or in a session `/plugin marketplace add rwfresh/aitextaroo-clients` then `/plugin install aitextaroo@aitextaroo` |
 | Claude, Claude Desktop, Claude Duet | Customize → Plugins → Add marketplace → `rwfresh/aitextaroo-clients`, or Customize → Connectors → Add custom connector → `https://api.aitextaroo.com/mcp` |
 | ChatGPT and Dots | Plugins → + → Add custom MCP server → `https://api.aitextaroo.com/mcp` → OAuth |
 | Codex | `codex plugin marketplace add rwfresh/aitextaroo-clients`, then `codex plugin add aitextaroo@aitextaroo` |
@@ -20,7 +20,7 @@ Gemini CLI, the `aitextaroo` command, a Python SDK, and an SMS bridge for CLI ag
 | Grok Bot | Say: "Add a custom MCP server called AI Text-a-roo at https://api.aitextaroo.com/mcp" |
 | Cursor | Add the MCP server to `~/.cursor/mcp.json` (run `aitextaroo connect cursor`) |
 | Any skills-aware agent | `npx skills add rwfresh/aitextaroo-clients` |
-| Claude Code, Codex, Hermes, OpenClaw, Grok, Gemini, Goose (answer texts from your phone) | `pipx install aitextaroo`, then `aitextaroo-bridge` |
+| Claude Code, Codex, Hermes, OpenClaw, Grok, Gemini, Antigravity, Goose, Cursor (answer texts from your phone) | `pipx install aitextaroo`, then `aitextaroo-bridge` |
 
 The plugins bundle the skill and the remote MCP server. They sign in with OAuth: you enter
 your phone number and the 6-digit code we text you, so there's no API key to copy. Setup
@@ -45,6 +45,8 @@ aitextaroo send "Hello from my agent!"
 ## The `aitextaroo` command
 
 Made for agents with a shell. Output is JSON; errors go to stderr with exit code 1.
+`aitextaroo verify-pin` exits 2 when the PIN is wrong, so `aitextaroo verify-pin 4821 && …`
+only continues on a match.
 
 ```bash
 aitextaroo send "Build finished: 318 tests passing."
@@ -74,14 +76,14 @@ aitextaroo-bridge --agent-command "pnpm --silent --dir ~/nanoclaw run chat"   # 
 | `--agent` | Runs |
 |---|---|
 | `claude` | `claude -p "<prompt>"` |
-| `codex` | `codex exec --skip-git-repo-check -o <file> "<prompt>"` |
+| `codex` | `codex exec --skip-git-repo-check --color never -o <file> "<prompt>"` |
 | `hermes` | `hermes -z "<prompt>"` |
 | `openclaw` | `openclaw agent exec "<prompt>"` |
-| `grok` | `grok -p "<prompt>"` |
+| `grok` | `grok --no-auto-update -p "<prompt>"` |
 | `gemini` | `gemini -p "<prompt>"` |
 | `antigravity` | `agy -p "<prompt>"` |
 | `goose` | `goose run -q --no-session -t "<prompt>"` |
-| `cursor` | `agent -p --trust "<prompt>"` (explicit only; Grok also installs an `agent` binary) |
+| `cursor` | `cursor-agent -p --trust "<prompt>"`, or `agent` if that's all there is (explicit only: Grok Build also installs an `agent` binary, and the bridge refuses it) |
 
 Auto-detect tries them in this order. `--agent-command` runs any CLI that takes the prompt
 as its last argument and prints the reply.

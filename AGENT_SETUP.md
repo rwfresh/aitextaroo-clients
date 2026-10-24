@@ -85,8 +85,12 @@ public IP or webhook is needed.
 nohup aitextaroo-bridge > ~/aitextaroo.log 2>&1 &
 ```
 
-- Supported agents: Claude Code, Codex, Hermes, OpenClaw, NanoClaw and Grok
-  (`--agent claude|codex|hermes|openclaw|nanoclaw|grok`; default: the first one installed).
+- Supported agents: Claude Code, Codex, Hermes, OpenClaw, Grok, Gemini CLI,
+  Antigravity CLI, Goose and Cursor CLI
+  (`--agent claude|codex|hermes|openclaw|grok|gemini|antigravity|goose|cursor`;
+  default: the first one installed; Cursor only when chosen with `--agent cursor`).
+- NanoClaw, or any CLI that takes the prompt as its last argument and prints
+  the reply: `--agent-command "pnpm --silent --dir ~/nanoclaw run chat"`.
 - History is kept locally in `~/.aitextaroo/sessions/`.
 - SMS commands for the user: `/help`, `/new` (fresh conversation), `/status`.
 - Check it's running: `pgrep -f aitextaroo-bridge`. Logs: `tail -20 ~/aitextaroo.log`.
@@ -110,8 +114,9 @@ returned at registration) and, if set, the `Authorization` header.
 ## Good texts
 
 Plain text, short, and say what reply you need. Before sensitive actions, ask
-the user to text their PIN and check it (`aitextaroo verify-pin`, or the
-`verify_pin` MCP tool). Never ask the user to text passwords or card numbers.
+the user to text their PIN and check it (`aitextaroo verify-pin`, which exits 2
+when the PIN is wrong, or the `verify_pin` MCP tool). Never ask the user to
+text passwords or card numbers.
 
 ## Plans and limits
 

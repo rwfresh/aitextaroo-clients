@@ -15,14 +15,17 @@ import logging
 import os
 import shlex
 import shutil
+import subprocess
 import tempfile
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 logger = logging.getLogger(__name__)
 
 # Maximum time to wait for an agent to respond (seconds).
 DEFAULT_TIMEOUT = 120
+# How long `<command> --version` may take when checking which CLI a binary is.
+VERSION_CHECK_TIMEOUT = 5.0
 
 
 class Agent(ABC):
@@ -107,6 +110,11 @@ class CliAgentConfig:
     # False for CLIs whose binary name is ambiguous (e.g. Cursor's `agent`):
     # they're only used when chosen explicitly with --agent.
     auto_detect: bool = True
+    # Unambiguous names for the same CLI, run instead of `command` when on PATH.
+    preferred_commands: tuple[str, ...] = ()
+    # Another tool that installs a binary called `command`. If
+    # `command --version` mentions it, create_agent() refuses to run it.
+    conflicting_cli: str | None = None
 
 
 class CliAgent(Agent):
@@ -115,9 +123,9 @@ class CliAgent(Agent):
     Each call to ask() spawns a fresh process:
         {command} {args} "{prompt}"
 
-    Stdout is captured as the response. Stderr is logged on failure.
-    This is the simplest and most reliable approach — no process
-    lifecycle management, no stdin/stdout protocol, no state leaks.
+    Stdout is captured as the response; stderr is logged on failure;
+    stdin is /dev/null. This is the simplest and most reliable approach — no
+    process lifecycle management, no stdin/stdout protocol, no state leaks.
 
     The agent receives the complete prompt from the bridge. It does
     not manage system prompts or conversation context — that's the
@@ -165,8 +173,11 @@ class CliAgent(Agent):
         text = cmd[-1]
         logger.debug("Running: %s %s '%s...'", cmd[0], " ".join(cmd[1:-1]), text[:40])
 
+        # No stdin: the prompt is an argument, and some CLIs (`codex exec`)
+        # also read piped stdin, hanging on the bridge's own until timeout.
         process = await asyncio.create_subprocess_exec(
             *cmd,
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -274,8 +285,11 @@ BUILTIN_AGENTS: dict[str, CliAgentConfig] = {
         command="agent",
         args=["-p", "--trust"],
         system_prompt=SMS_SYSTEM_PROMPT,
-        # Grok Build also installs a binary called `agent`.
+        # Grok Build also installs a binary called `agent`: prefer Cursor's
+        # own `cursor-agent`, and refuse an `agent` that says it's Grok.
         auto_detect=False,
+        preferred_commands=("cursor-agent",),
+        conflicting_cli="grok",
     ),
 }
 
@@ -318,10 +332,45 @@ def create_agent(name: str) -> CliAgent:
         A ready-to-use CliAgent.
 
     Raises:
-        ValueError: If the agent name is not recognized.
+        ValueError: If the agent name is not recognized, or its binary on
+            PATH belongs to a different CLI.
     """
     config = BUILTIN_AGENTS.get(name)
     if config is None:
         available = ", ".join(BUILTIN_AGENTS.keys())
         raise ValueError(f"Unknown agent: {name!r}. Available: {available}")
-    return CliAgent(config)
+    return CliAgent(_resolve_command(config))
+
+
+def _resolve_command(config: CliAgentConfig) -> CliAgentConfig:
+    """Pick the binary that runs this agent, refusing one from a different CLI."""
+    for preferred in config.preferred_commands:
+        if shutil.which(preferred):
+            return replace(config, command=preferred)
+    if config.conflicting_cli and shutil.which(config.command):
+        version = _version_text(config.command)
+        if config.conflicting_cli in version.lower():
+            first_line = version.strip().splitlines()[0]
+            wanted = config.preferred_commands[0] if config.preferred_commands else config.command
+            raise ValueError(
+                f"`{config.command}` on PATH is not {config.name}: `{config.command} --version` "
+                f"prints {first_line!r}. Install {config.name} so `{wanted}` is on PATH, "
+                "or choose another agent with --agent."
+            )
+    return config
+
+
+def _version_text(command: str) -> str:
+    """Return what `command --version` prints, or "" if it fails or hangs."""
+    try:
+        result = subprocess.run(  # noqa: S603 (a fixed binary name from BUILTIN_AGENTS)
+            [command, "--version"],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=VERSION_CHECK_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return f"{result.stdout}\n{result.stderr}"

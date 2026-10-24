@@ -14,8 +14,10 @@ Usage:
     aitextaroo connect [claude-code|codex|gemini|cursor|muse-code|claude|chatgpt|grok]
 
 Results are JSON on stdout (except `connect`, which prints instructions);
-errors go to stderr with exit code 1. The API key comes from --api-key,
-AITEXTAROO_API_KEY, or ~/.aitextaroo/credentials.json (aitextaroo-setup --save).
+errors go to stderr with exit code 1. `verify-pin` prints its result and exits
+with code 2 when the PIN is wrong, so `aitextaroo verify-pin 4821 && ...` only
+proceeds on a match. The API key comes from --api-key, AITEXTAROO_API_KEY, or
+~/.aitextaroo/credentials.json (aitextaroo-setup --save).
 """
 
 from __future__ import annotations
@@ -28,10 +30,15 @@ import sys
 from dataclasses import asdict
 from typing import Any
 
+import httpx
+
 from aitextaroo.client import DEFAULT_BASE_URL, TextarooClient, TextarooError
 from aitextaroo.credentials import load_api_key
 
 MCP_URL = "https://api.aitextaroo.com/mcp"
+
+# Exit code for `verify-pin` when the PIN doesn't match (1 means an error).
+PIN_REJECTED_EXIT = 2
 
 # How to add the remote MCP server to each client. OAuth-capable apps sign
 # in with the user's phone; header-based clients read the key from the env.
@@ -114,8 +121,14 @@ def main(argv: list[str] | None = None) -> None:
         result = asyncio.run(_run(args, key))
     except TextarooError as exc:
         _fail(f"{exc.code}: {exc.message}")
+    except (httpx.HTTPError, OSError) as exc:
+        # Connection refused, DNS failure, timeout... a short line, not a traceback.
+        reason = str(exc) or type(exc).__name__
+        _fail(f"Network error reaching {args.base_url}: {reason}")
     json.dump(result, sys.stdout, indent=2)
     sys.stdout.write("\n")
+    if args.command == "verify-pin" and result.get("verified") is not True:
+        sys.exit(PIN_REJECTED_EXIT)
 
 
 async def _run(args: argparse.Namespace, key: str) -> Any:

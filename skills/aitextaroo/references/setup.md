@@ -34,11 +34,11 @@ With an API key you can also connect any MCP client to `https://api.aitextaroo.c
 
 ```
 claude mcp add --transport http --scope user aitextaroo https://api.aitextaroo.com/mcp --header "Authorization: Bearer $AITEXTAROO_API_KEY"
-codex mcp add aitextaroo --url https://api.aitextaroo.com/mcp
+codex mcp add aitextaroo --url https://api.aitextaroo.com/mcp --bearer-token-env-var AITEXTAROO_API_KEY
 gemini mcp add --transport http --scope user --header "Authorization: Bearer $AITEXTAROO_API_KEY" aitextaroo https://api.aitextaroo.com/mcp
 ```
 
-## C. Local CLI agents that should answer texts (Claude Code, Codex, Hermes, OpenClaw, NanoClaw, Grok)
+## C. Local CLI agents that should answer texts (Claude Code, Codex, Hermes, OpenClaw, Grok, Gemini CLI, Antigravity, Goose, Cursor, NanoClaw)
 
 The bridge is a small program that keeps one outbound connection to AI Text-a-roo and turns every text the user sends into a prompt for a local CLI agent, then texts back the answer. No public IP or webhook is needed.
 
@@ -49,7 +49,8 @@ aitextaroo-setup --phone +12125551234 --code 123456 --save
 nohup aitextaroo-bridge > ~/aitextaroo.log 2>&1 &
 ```
 
-- `--agent claude|codex|hermes|openclaw|nanoclaw|grok` picks the agent (default: auto-detect).
+- `--agent claude|codex|hermes|openclaw|grok|gemini|antigravity|goose|cursor` picks the agent (default: auto-detect; Cursor only when chosen with `--agent cursor`).
+- NanoClaw, or any CLI that takes the prompt as its last argument and prints the reply: `--agent-command "pnpm --silent --dir ~/nanoclaw run chat"`.
 - Conversation history is saved locally in `~/.aitextaroo/sessions/`.
 - The user can text `/help`, `/new` (start a fresh conversation) and `/status`.
 - Check it's running with `pgrep -f aitextaroo-bridge`; read logs with `tail -20 ~/aitextaroo.log`.
