@@ -76,9 +76,7 @@ class TestStreamStopsForGood:
         assert texts == ["hi"]  # texts before the removal still arrive
         assert error is not None
         assert error.code == "credential_revoked"
-        assert error.message == (
-            "This key was removed from your account; run aitextaroo-setup --save to add a new one."
-        )
+        assert error.message == STREAM_STOPS["credential_revoked"]
         assert len(seen) == 1
         sleep.assert_not_awaited()
         await client.close()

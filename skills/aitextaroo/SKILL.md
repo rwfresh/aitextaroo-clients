@@ -100,7 +100,7 @@ If the user asks how AI Text-a-roo works, what it stores, or how it's secured, c
 ## Troubleshooting
 
 - `401 unauthorized`: the API key is wrong or was removed from the account (on the dashboard, with `remove_connection`, or as the unused one when an 11th key was added). Redo setup to add a new key (nothing else is signed out), or ask the user to create one on the dashboard.
-- The bridge stopped, saying the key was removed (`credential_revoked`): add a new key with `aitextaroo-setup --save`, then start it again. If it says another bridge or app is receiving the account's texts (`evicted`): only one can at a time, so stop the other one first.
+- The bridge stopped, saying its key was removed or isn't on the account: if a new key was saved since, just start it again; otherwise add one with `aitextaroo-setup --save`, then start it. If it says another one took over (`evicted`): another copy of the bridge, or another program reading the account's live stream, started somewhere with one of the account's keys. Only one can listen at a time, so stop that one, then start this one again. Connected apps such as Grok or Claude, and forwarding, never cause this.
 - `daily_limit_reached`: wait until midnight UTC, or offer the upgrade link.
 - `rate_limit_exceeded`: more than 5 texts in a minute, or too many PIN, forwarding or connection changes in an hour or a day; wait and try again later.
 - Relay rejected: texting contacts needs Pro. Offer `get_upgrade_link`.

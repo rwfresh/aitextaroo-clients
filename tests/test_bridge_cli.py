@@ -26,16 +26,19 @@ class TestBridgeStops:
         # Exit 0, so a service set to restart on failure leaves it stopped.
         _run_bridge(TextarooError("credential_revoked", STREAM_STOPS["credential_revoked"]))
         assert capsys.readouterr().err == (
-            "Bridge stopped: This key was removed from your account; "
-            "run aitextaroo-setup --save to add a new one.\n"
+            "Bridge stopped: This key was removed from your account. If you've saved a "
+            "new one since, just start the bridge again; otherwise run aitextaroo-setup "
+            "--save to add one.\n"
         )
 
     def test_another_stream_taking_over_exits_cleanly(self, capsys) -> None:
         # Restarting would just knock the other bridge off again.
         _run_bridge(TextarooError("evicted", STREAM_STOPS["evicted"]))
-        err = capsys.readouterr().err
-        assert err.startswith("Bridge stopped: Another bridge or app is receiving")
-        assert "Stop the other one" in err
+        assert capsys.readouterr().err == (
+            "Bridge stopped: Another bridge or program started listening for this "
+            "account's texts (with any of its keys), and only one can listen at a time. "
+            "Stop the other one, then start this one again.\n"
+        )
 
     def test_rejected_key_exits_cleanly_too(self, capsys) -> None:
         # A key removed while the bridge was off gets a 401 on the next start.

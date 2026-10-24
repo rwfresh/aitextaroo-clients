@@ -48,16 +48,20 @@ WAIT_HTTP_MARGIN = 15.0
 
 # Stream error events after which reconnecting can't help, so listen() raises
 # a TextarooError with that code instead. Reconnecting after "evicted" would
-# just knock the other stream off in turn, back and forth.
+# just knock the other stream off in turn, back and forth. Only programs
+# reading /v1/stream cause "evicted": connected apps (Grok, Claude...) and
+# forwarding never do.
 CREDENTIAL_REVOKED = "credential_revoked"
 EVICTED = "evicted"
 STREAM_STOPS: dict[str, str] = {
     CREDENTIAL_REVOKED: (
-        "This key was removed from your account; run aitextaroo-setup --save to add a new one."
+        "This key was removed from your account. If you've saved a new one since, "
+        "just start the bridge again; otherwise run aitextaroo-setup --save to add one."
     ),
     EVICTED: (
-        "Another bridge or app is receiving this account's texts now, and only one "
-        "can at a time. Stop the other one to use this one."
+        "Another bridge or program started listening for this account's texts "
+        "(with any of its keys), and only one can listen at a time. Stop the other "
+        "one, then start this one again."
     ),
 }
 
