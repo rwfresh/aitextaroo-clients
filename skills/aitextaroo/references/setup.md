@@ -58,18 +58,22 @@ nohup aitextaroo-bridge > ~/aitextaroo.log 2>&1 &
 
 ### Keep it running after a restart
 
-`nohup` stops when the computer restarts. To have the bridge start on its own, run it as a background service. Replace `claude` with your agent (the `--agent` value above). Both snippets record the bridge's full path and the current `PATH` when you run them, so the service can find your agent's command; run them from a shell where `claude` (or your agent) works.
+`nohup` stops when the computer restarts. To have the bridge start on its own, run it as a background service. Replace `claude` with your agent (the `--agent` value above). Both snippets record the bridge's full path and the current `PATH` when you run them, so the service can find your agent's command; run them from a shell where `claude` (or your agent) works. Each starts by checking the bridge is installed, and stops if it isn't (run `pipx ensurepath` and open a new shell, then try again).
 
 Linux (systemd user service):
 
 ```bash
+(  # a subshell: stops at the first error without closing your shell
+set -e
+BRIDGE=$(command -v aitextaroo-bridge) || { echo "aitextaroo-bridge not found on PATH"; exit 1; }
 mkdir -p ~/.config/systemd/user
 cat > ~/.config/systemd/user/aitextaroo-bridge.service <<EOF
 [Unit]
 Description=AI Text-a-roo SMS bridge
 
 [Service]
-ExecStart=$(command -v aitextaroo-bridge) --agent claude
+ExecStart=$BRIDGE --agent claude
+WorkingDirectory=$HOME
 Environment="PATH=$PATH"
 Restart=always
 RestartSec=10
@@ -79,14 +83,19 @@ WantedBy=default.target
 EOF
 systemctl --user daemon-reload
 systemctl --user enable --now aitextaroo-bridge
-loginctl enable-linger "$USER"   # keep it running while logged out (may ask for a password)
+loginctl enable-linger "$USER"   # keep it running while logged out
+)
 ```
 
-Check it with `systemctl --user status aitextaroo-bridge`; logs: `journalctl --user -u aitextaroo-bridge -n 20`.
+If `loginctl enable-linger` fails (it can need a password, and an agent's shell can't type one), ask the user to run `sudo loginctl enable-linger $USER` in Terminal. Without it, the bridge runs only while they're logged in. Check it with `systemctl --user status aitextaroo-bridge`; logs: `journalctl --user -u aitextaroo-bridge -n 20`.
 
 macOS (launchd agent):
 
 ```bash
+(  # a subshell: stops at the first error without closing your shell
+set -e
+BRIDGE=$(command -v aitextaroo-bridge) || { echo "aitextaroo-bridge not found on PATH"; exit 1; }
+mkdir -p ~/Library/LaunchAgents
 cat > ~/Library/LaunchAgents/com.aitextaroo.bridge.plist <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -95,10 +104,11 @@ cat > ~/Library/LaunchAgents/com.aitextaroo.bridge.plist <<EOF
   <key>Label</key><string>com.aitextaroo.bridge</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$(command -v aitextaroo-bridge)</string>
+    <string>$BRIDGE</string>
     <string>--agent</string>
     <string>claude</string>
   </array>
+  <key>WorkingDirectory</key><string>$HOME</string>
   <key>EnvironmentVariables</key>
   <dict><key>PATH</key><string>$PATH</string></dict>
   <key>RunAtLoad</key><true/>
@@ -108,12 +118,14 @@ cat > ~/Library/LaunchAgents/com.aitextaroo.bridge.plist <<EOF
 </dict>
 </plist>
 EOF
+launchctl bootout gui/$(id -u)/com.aitextaroo.bridge 2>/dev/null || true   # unload any older copy first
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.aitextaroo.bridge.plist
+)
 ```
 
-Logs: `tail -20 ~/aitextaroo.log`. Restart: `launchctl kickstart -k gui/$(id -u)/com.aitextaroo.bridge`. Stop: `launchctl bootout gui/$(id -u)/com.aitextaroo.bridge` (also run this first if `bootstrap` says it's already loaded).
+Logs: `tail -20 ~/aitextaroo.log`. Restart: `launchctl kickstart -k gui/$(id -u)/com.aitextaroo.bridge`. Stop: `launchctl bootout gui/$(id -u)/com.aitextaroo.bridge`.
 
-Then ask the user to text their AI Text-a-roo number, and confirm the reply comes back.
+Then ask the user to text their AI Text-a-roo number and tell you whether the reply came back. Don't call `wait_for_reply` while testing: a waiting call takes the text before the bridge does.
 
 ## D. Agents with an inbound webhook URL
 

@@ -50,7 +50,9 @@ https://api.aitextaroo.com/mcp
    permissions, where `aitextaroo` and `aitextaroo-bridge` find it in later
    sessions. Without `--save`, store the printed key yourself (for example as
    `AITEXTAROO_API_KEY`); it can't be retrieved again. Confirming a code for a
-   phone that already has an account issues a new key, and the old key stops working.
+   phone that already has an account issues a new key: the old key stops working,
+   every app connected before (including OAuth connectors like Grok or Claude) is
+   signed out, and forwarding to a webhook is turned off. Tell the user first.
 
 4. Tell the user their AI's number (`assigned_number`) and suggest saving it as a
    contact such as "My AI". Then send a test text:

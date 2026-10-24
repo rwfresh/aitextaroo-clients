@@ -41,6 +41,8 @@ aitextaroo send "Hello from my agent!"
 
 `--save` stores the API key in `~/.aitextaroo/credentials.json` with owner-only permissions.
 `aitextaroo` and `aitextaroo-bridge` find it there, or in `AITEXTAROO_API_KEY`, or in `--api-key`.
+Verifying a phone that already has an account makes a new key: apps connected before are
+signed out and webhook forwarding is turned off.
 
 ## The `aitextaroo` command
 
