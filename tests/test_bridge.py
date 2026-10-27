@@ -383,13 +383,30 @@ class TestBridgeSendFailures:
     ) -> None:
         bridge, client = _bridge(failure)
 
-        with caplog.at_level(logging.ERROR, logger="aitextaroo.bridge"):
+        with caplog.at_level(logging.INFO, logger="aitextaroo.bridge"):
             await bridge._handle(_make_message("When's dinner?"))
 
         assert _sent(client) == [REPLY]
         assert sleeps == []
         assert bridge._conversation.count == 2  # the owner may have it
         assert "A reply may not have been sent" in caplog.text
+        assert "Reply sent" not in caplog.text
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure", [
+        httpx.LocalProtocolError("Illegal header value"),  # a stray newline in the key
+        httpx.UnsupportedProtocol("no scheme"),
+        _api_error(307, "http_error"),
+    ])
+    async def test_a_text_that_was_never_sent_stays_out_of_the_history(
+        self, sleeps, failure
+    ) -> None:
+        bridge, client = _bridge(failure)
+
+        await bridge._handle(_make_message("When's dinner?"))
+
+        assert _sent(client) == [REPLY]
+        assert bridge._conversation.is_empty
 
     @pytest.mark.asyncio
     async def test_an_unexpected_failure_logs_its_traceback(self, sleeps, caplog) -> None:

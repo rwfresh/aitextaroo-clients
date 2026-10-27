@@ -15,6 +15,7 @@ This module is orchestration — it delegates to:
 from __future__ import annotations
 
 import asyncio
+import enum
 import logging
 from pathlib import Path
 
@@ -53,6 +54,14 @@ _NO_NOTICE = frozenset({401, 403, 429})
 
 # Waits between tries (a seam for tests).
 _sleep = asyncio.sleep
+
+
+class Delivery(enum.Enum):
+    """What became of a text the bridge sent."""
+
+    SENT = "sent"
+    UNSENT = "unsent"  # certainly didn't go out
+    UNKNOWN = "unknown"  # may have gone out
 
 
 class Bridge:
@@ -137,7 +146,7 @@ class Bridge:
         await self._handle_conversation(message.id, text)
 
     async def _handle_conversation(self, message_id: str, text: str) -> None:
-        """Build prompt, call agent, record history, send reply."""
+        """Build prompt, call agent, send reply, record history."""
         logger.info("Inbound SMS [%s]: %s", message_id, text[:50])
 
         prompt = self._build_prompt(text)
@@ -164,7 +173,8 @@ class Bridge:
             formatted = formatted[: MAX_SMS_LENGTH - 3] + "..."
             logger.warning("Response truncated to %d chars", MAX_SMS_LENGTH)
 
-        if not await self._send(formatted):
+        delivery = await self._send(formatted)
+        if delivery is Delivery.UNSENT:
             return
 
         # Record both sides unless the reply certainly didn't go out, so the
@@ -173,7 +183,8 @@ class Bridge:
         self._conversation.add_user_message(text)
         self._conversation.add_assistant_message(response)
         self._commands.increment_message_count()
-        logger.info("Reply sent for %s", message_id)
+        if delivery is Delivery.SENT:
+            logger.info("Reply sent for %s", message_id)
 
     def _build_prompt(self, text: str) -> str:
         """Assemble the complete prompt: system + history + new message.
@@ -199,8 +210,8 @@ class Bridge:
 
         return "\n\n".join(parts)
 
-    async def _send(self, text: str) -> bool:
-        """Text the owner: False only if it certainly didn't go out. Only cancellation escapes.
+    async def _send(self, text: str) -> Delivery:
+        """Text the owner, and say whether it went out. Only cancellation escapes.
 
         A text that almost certainly wasn't sent is tried again (RETRY_DELAYS).
         One the API refuses is replaced with REFUSED_NOTICE, so the owner knows
@@ -208,22 +219,22 @@ class Bridge:
         """
         error = await self._try_send(text)
         if error is None:
-            return True
+            return Delivery.SENT
         if _refused(error):
             logger.error("The API refused a reply (%s); telling the owner", _reason(error))
             notice_error = await self._try_send(REFUSED_NOTICE)
             if notice_error is not None:
                 logger.error("Couldn't text the owner that either (%s)", _reason(notice_error))
-            return False
+            return Delivery.UNSENT
         if _unsent(error):
             logger.error("Couldn't send a reply (%s)", _reason(error))
-            return False
+            return Delivery.UNSENT
         logger.error(
             "A reply may not have been sent (%s)",
             _reason(error),
             exc_info=error if _unexpected(error) else None,
         )
-        return True  # the owner may have it
+        return Delivery.UNKNOWN
 
     async def _try_send(self, text: str) -> Exception | None:
         """Send, trying again while it almost certainly wasn't sent: the last error, or None."""
@@ -249,15 +260,24 @@ def _worth_retrying(exc: Exception) -> bool:
     )
 
 
+# Raised before a request is sent: a header or URL httpx won't send.
+_NEVER_SENT = (httpx.LocalProtocolError, httpx.UnsupportedProtocol, httpx.InvalidURL)
+
+
 def _unsent(exc: Exception) -> bool:
     """Whether a failed text (almost) certainly didn't go out.
 
-    It never got through, the API turned it down before sending (it answers
-    every 4xx before the carrier gets the text), or the carrier did.
+    It never got through, was redirected, the API turned it down before
+    sending (it answers every 4xx before the carrier gets the text), or the
+    carrier did.
     """
-    return _worth_retrying(exc) or (
-        isinstance(exc, TextarooError)
-        and (400 <= exc.status_code < 500 or exc.code == "carrier_error")
+    return (
+        _worth_retrying(exc)
+        or isinstance(exc, _NEVER_SENT)
+        or (
+            isinstance(exc, TextarooError)
+            and (300 <= exc.status_code < 500 or exc.code == "carrier_error")
+        )
     )
 
 

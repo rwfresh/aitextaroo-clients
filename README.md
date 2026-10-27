@@ -107,8 +107,8 @@ history. Responses are stripped of markdown for SMS.
 
 When a reply doesn't go out:
 - **The API couldn't be reached, or was restarting for a deploy:** the bridge tries again three
-  times, a few seconds apart (longer, up to a minute, when the API asks it to wait). Very rarely,
-  if the API stopped partway through sending, you could get the reply twice.
+  times, 2, 5 and 15 seconds apart (longer, up to a minute, when the API asks it to wait). Very
+  rarely, if the API stopped partway through sending, you could get the reply twice.
 - **The API refused it:** you get "Sorry, my reply couldn't be sent" instead.
 - **Anything else** (the daily limit, a carrier error): the log says why.
 

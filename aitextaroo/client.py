@@ -38,6 +38,8 @@ logger = logging.getLogger(__name__)
 # Defaults
 DEFAULT_BASE_URL = "https://api.aitextaroo.com"
 DEFAULT_RECONNECT_DELAY = 3.0
+# The shortest and longest waits the server's retry_after can set.
+MIN_RECONNECT_DELAY = 1.0
 MAX_RECONNECT_DELAY = 60.0
 RECONNECT_BACKOFF_FACTOR = 2.0
 
@@ -660,7 +662,10 @@ class TextarooClient:
                                 raise TextarooError(code=event.error.code, message=stop)
                             logger.warning("Stream error: %s", event.error)
                             if event.error.retry_after:
-                                delay = min(event.error.retry_after, MAX_RECONNECT_DELAY)
+                                delay = min(
+                                    max(event.error.retry_after, MIN_RECONNECT_DELAY),
+                                    MAX_RECONNECT_DELAY,
+                                )
 
             # Every network failure, read timeouts included (ReadTimeout
             # isn't a ReadError): the connection is gone, so reconnect.

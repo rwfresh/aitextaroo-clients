@@ -10,6 +10,7 @@ import pytest
 from aitextaroo.client import (
     DEFAULT_RECONNECT_DELAY,
     MAX_RECONNECT_DELAY,
+    MIN_RECONNECT_DELAY,
     STREAM_READ_TIMEOUT,
     STREAM_STOPS,
     TextarooClient,
@@ -180,6 +181,7 @@ class TestStreamReconnects:
         (10**400, DEFAULT_RECONNECT_DELAY),  # too big for a float: ignored, not a crash
         (-5, DEFAULT_RECONNECT_DELAY),
         (86400, MAX_RECONNECT_DELAY),  # capped
+        (0.0001, MIN_RECONNECT_DELAY),  # never a hot reconnect loop
     ])
     async def test_an_odd_retry_after_never_stops_or_stalls_the_stream(
         self, sleep, retry_after, wait
