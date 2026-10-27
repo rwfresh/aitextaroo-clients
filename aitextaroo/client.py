@@ -77,12 +77,19 @@ _CONNECTION_ID = re.compile(r"(?:key|app)_[A-Za-z0-9_-]{1,100}")
 
 
 class TextarooError(Exception):
-    """Raised when an API call fails."""
+    """Raised when an API call fails.
 
-    def __init__(self, code: str, message: str, status_code: int = 0):
+    retry_after is the seconds the API asks you to wait before trying
+    again (its rate limits say), or None.
+    """
+
+    def __init__(
+        self, code: str, message: str, status_code: int = 0, retry_after: float | None = None
+    ):
         self.code = code
         self.message = message
         self.status_code = status_code
+        self.retry_after = retry_after
         super().__init__(f"{code}: {message}")
 
 
@@ -127,10 +134,12 @@ def _parse_json_response(response: httpx.Response, fallback_message: str) -> dic
             error = detail.get("error")
         if not isinstance(error, dict):
             error = _error_from_detail(detail, response.status_code)
+        retry_after = error.get("retry_after")
         raise TextarooError(
             code=error.get("code", "unknown"),
             message=error.get("message", fallback_message),
             status_code=response.status_code,
+            retry_after=retry_after if _is_seconds(retry_after) else None,
         )
 
     if not isinstance(data, dict):
@@ -141,6 +150,13 @@ def _parse_json_response(response: httpx.Response, fallback_message: str) -> dic
         )
 
     return data
+
+
+def _is_seconds(value: object) -> bool:
+    """Whether a JSON value is a usable number of seconds (not a bool, not negative)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return 0 <= value < float("inf")
 
 
 # Where FastAPI says a request field lives; the first entry of a validation "loc".

@@ -144,6 +144,21 @@ class TestParseJsonResponse:
         assert exc_info.value.code == "rate_limited"
         assert exc_info.value.status_code == 429
 
+    def test_429_keeps_how_long_to_wait(self) -> None:
+        body = '{"error": {"code": "rate_limit_exceeded", "message": "Slow", "retry_after": 60}}'
+        resp = self._make_response(429, body)
+        with pytest.raises(TextarooError) as exc_info:
+            _parse_json_response(resp, "fail")
+        assert exc_info.value.retry_after == 60
+
+    @pytest.mark.parametrize("retry_after", ['"60"', "true", "-1", "null", "[60]", "1e999"])
+    def test_an_unusable_retry_after_is_ignored(self, retry_after: str) -> None:
+        error = f'{{"code": "rate_limit_exceeded", "message": "x", "retry_after": {retry_after}}}'
+        resp = self._make_response(429, f'{{"error": {error}}}')
+        with pytest.raises(TextarooError) as exc_info:
+            _parse_json_response(resp, "fail")
+        assert exc_info.value.retry_after is None
+
     def test_401_unauthorized(self) -> None:
         resp = self._make_response(401, '{"error": {"code": "unauthorized", "message": "Bad key"}}')
         with pytest.raises(TextarooError) as exc_info:
