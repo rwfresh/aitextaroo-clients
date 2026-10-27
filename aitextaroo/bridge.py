@@ -41,6 +41,9 @@ MAX_SMS_LENGTH = 1600
 RETRY_DELAYS = (2.0, 5.0, 15.0)
 # The longest the bridge waits when the API says how long (retry_after).
 MAX_RETRY_AFTER = 60.0
+# A reply an earlier try may still be sending (send_in_doubt) is asked about
+# once more after this long, when that try has finished one way or the other.
+IN_DOUBT_WAIT = 30.0
 
 # Texted in place of a reply the API refuses, so the owner isn't left waiting.
 REFUSED_NOTICE = "Sorry, my reply couldn't be sent. Try asking again?"
@@ -245,12 +248,24 @@ class Bridge:
         key = uuid.uuid4().hex
         delays = list(RETRY_DELAYS)
         may_have_gone_out = False
+        asked_about_doubt = False
         while True:
             try:
                 await self._client.send(text, idempotency_key=key)
                 return None, False
             except Exception as exc:  # cancellation isn't an Exception: it ends the bridge
                 may_have_gone_out = may_have_gone_out or not _unsent(exc)
+                if _in_doubt(exc) and delays and not asked_about_doubt and self._keys_honored():
+                    # An earlier try may still be sending it: ask once more when it's done.
+                    asked_about_doubt = True
+                    delays.pop(0)
+                    logger.warning(
+                        "A reply may still be sending (%s); asking again in %g s",
+                        _reason(exc),
+                        IN_DOUBT_WAIT,
+                    )
+                    await _sleep(IN_DOUBT_WAIT)
+                    continue
                 if not delays or not _worth_retrying(exc, self._keys_honored()):
                     return exc, may_have_gone_out
                 wait = _retry_wait(exc, delays.pop(0))
@@ -260,6 +275,11 @@ class Bridge:
     def _keys_honored(self) -> bool:
         """Whether the API has shown it sends a text's Idempotency-Key at most once."""
         return getattr(self._client, "idempotency_supported", None) is True
+
+
+def _in_doubt(exc: Exception) -> bool:
+    """Whether the API said an earlier try with this key may be sending the text, or may have."""
+    return isinstance(exc, TextarooError) and exc.code == "send_in_doubt"
 
 
 def _worth_retrying(exc: Exception, keys_honored: bool) -> bool:

@@ -109,7 +109,8 @@ When a reply doesn't go out:
 - **The API couldn't be reached, was restarting for a deploy, or didn't answer:** the bridge tries
   again three times, 2, 5 and 15 seconds apart (longer, up to a minute, when the API asks it to
   wait). Each reply carries its own Idempotency-Key, so the API sends it at most once: you never
-  get it twice, even if a try that seemed to fail got through.
+  get it twice, even if a try that seemed to fail got through. A try that went unanswered is
+  repeated only once the API has shown it honours the key, which its first answer does.
 - **The API refused it:** you get "Sorry, my reply couldn't be sent" instead.
 - **Anything else** (the daily limit, a carrier error): the log says why.
 

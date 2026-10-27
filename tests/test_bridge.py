@@ -10,7 +10,14 @@ import pytest
 
 from aitextaroo import bridge as bridge_module
 from aitextaroo.agents import Agent
-from aitextaroo.bridge import MAX_RETRY_AFTER, MAX_SMS_LENGTH, REFUSED_NOTICE, RETRY_DELAYS, Bridge
+from aitextaroo.bridge import (
+    IN_DOUBT_WAIT,
+    MAX_RETRY_AFTER,
+    MAX_SMS_LENGTH,
+    REFUSED_NOTICE,
+    RETRY_DELAYS,
+    Bridge,
+)
 from aitextaroo.client import TextarooClient, TextarooError
 from aitextaroo.models import InboundMessage
 
@@ -399,7 +406,6 @@ class TestBridgeSendFailures:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("failure", [
-        _api_error(409, "send_in_doubt"),  # an earlier try is sending it, or stopped partway
         _api_error(200, "invalid_response"),
         RuntimeError("bug"),
     ])
@@ -484,6 +490,29 @@ class TestBridgeSendFailures:
         assert len(_sent(client)) == len(RETRY_DELAYS) + 1  # no "couldn't be sent" notice
         assert bridge._conversation.count == 2  # the owner may have it
         assert "A reply may not have been sent" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_a_reply_still_sending_is_asked_about_once_more(self, sleeps) -> None:
+        # A read timeout, then the first try was still sending it: by the next ask it went out.
+        bridge, client = _bridge(
+            httpx.ReadTimeout("no answer"), _api_error(409, "send_in_doubt"), None
+        )
+
+        await bridge._handle(_make_message("When's dinner?"))
+
+        assert len(_sent(client)) == 3 and len(set(_keys(client))) == 1
+        assert sleeps == [RETRY_DELAYS[0], IN_DOUBT_WAIT]
+        assert bridge._conversation.count == 2
+
+    @pytest.mark.asyncio
+    async def test_still_in_doubt_after_that_it_stays_unknown(self, sleeps) -> None:
+        in_doubt = _api_error(409, "send_in_doubt")
+        bridge, client = _bridge(in_doubt, in_doubt)
+
+        await bridge._handle(_make_message("When's dinner?"))
+
+        assert len(_sent(client)) == 2 and sleeps == [IN_DOUBT_WAIT]  # asked about once
+        assert bridge._conversation.count == 2  # it may have gone out
 
     @pytest.mark.asyncio
     async def test_a_duplicate_counts_as_sent(self, sleeps, caplog) -> None:
