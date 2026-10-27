@@ -33,6 +33,52 @@ MESSAGE = {
 }
 
 
+DUPLICATE = '{"status": "sent", "message_id": null, "duplicate": true}'
+
+
+class TestSendingOnce:
+    """An idempotency_key goes out as the Idempotency-Key header; a duplicate answers None."""
+
+    @pytest.mark.asyncio
+    async def test_the_key_is_sent_as_a_header(self) -> None:
+        client, seen = _recording_client(200, '{"status": "sent", "message_id": "msg_1"}')
+        assert await client.send("Dinner at 7", idempotency_key="text-1") == "msg_1"
+        assert await client.text_contact("+12125550100", "Hi", idempotency_key="text-2") == "msg_1"
+        assert [r.headers.get("Idempotency-Key") for r in seen] == ["text-1", "text-2"]
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_no_key_no_header(self) -> None:
+        client, seen = _recording_client(200, '{"status": "sent", "message_id": "msg_1"}')
+        await client.send("Dinner at 7")
+        assert "Idempotency-Key" not in seen[0].headers
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_a_duplicate_answers_none(self) -> None:
+        client, _ = _recording_client(200, DUPLICATE)
+        assert await client.send("Dinner at 7", idempotency_key="text-1") is None
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_a_duplicate_answer_to_a_request_without_a_key_is_invalid(self) -> None:
+        client, _ = _recording_client(200, DUPLICATE)
+        with pytest.raises(TextarooError) as exc_info:
+            await client.send("Dinner at 7")
+        assert exc_info.value.code == "invalid_response"
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_send_in_doubt(self) -> None:
+        client, _ = _recording_client(
+            409, '{"error": {"code": "send_in_doubt", "message": "It may have gone out already."}}'
+        )
+        with pytest.raises(TextarooError) as exc_info:
+            await client.send("Dinner at 7", idempotency_key="text-1")
+        assert (exc_info.value.code, exc_info.value.status_code) == ("send_in_doubt", 409)
+        await client.close()
+
+
 class TestTextContact:
     @pytest.mark.asyncio
     async def test_sends_to_and_name(self) -> None:

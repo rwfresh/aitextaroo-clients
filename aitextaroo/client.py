@@ -322,21 +322,36 @@ class TextarooClient:
 
     # ── Outbound messaging ──────────────────────────────────────
 
-    async def send(self, text: str) -> str:
+    async def send(self, text: str, *, idempotency_key: str | None = None) -> str | None:
         """Send an SMS to the registered user.
 
         Args:
             text: Message body (max 1600 characters).
+            idempotency_key: Your own random ID for this text (1-64 letters,
+                digits, "-" or "_", e.g. uuid4().hex), the same on every
+                retry. However often you send it, the text goes out at most
+                once: a retry of one that went out returns None, and one an
+                earlier request is still sending, or that stopped partway,
+                raises TextarooError "send_in_doubt" (409). A key counts
+                for about a day.
 
         Returns:
-            The carrier message ID.
+            The carrier message ID, or None when an earlier request with
+            the same idempotency_key already sent it.
 
         Raises:
             TextarooError: If the API returns an error.
         """
-        return await self._post_send({"text": text})
+        return await self._post_send({"text": text}, idempotency_key)
 
-    async def text_contact(self, to: str, text: str, recipient_name: str | None = None) -> str:
+    async def text_contact(
+        self,
+        to: str,
+        text: str,
+        recipient_name: str | None = None,
+        *,
+        idempotency_key: str | None = None,
+    ) -> str | None:
         """Text someone else on the user's behalf (Pro plan).
 
         The contact sees the AI's number. Their replies are forwarded to
@@ -348,9 +363,11 @@ class TextarooClient:
             to: The contact's number in E.164 format (e.g., "+12125550100").
             text: Message body (max 1600 characters).
             recipient_name: Optional name used to label forwarded replies.
+            idempotency_key: As for send(): the text goes out at most once.
 
         Returns:
-            The carrier message ID.
+            The carrier message ID, or None when an earlier request with
+            the same idempotency_key already sent it.
 
         Raises:
             TextarooError: If the API returns an error ("tier_required" on Free).
@@ -358,12 +375,15 @@ class TextarooClient:
         body: dict[str, Any] = {"text": text, "to": to}
         if recipient_name:
             body["recipient_name"] = recipient_name
-        return await self._post_send(body)
+        return await self._post_send(body, idempotency_key)
 
-    async def _post_send(self, body: dict[str, Any]) -> str:
+    async def _post_send(self, body: dict[str, Any], idempotency_key: str | None) -> str | None:
         client = await self._get_client()
-        response = await client.post("/v1/send", json=body)
+        headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
+        response = await client.post("/v1/send", json=body, headers=headers)
         data = _parse_json_response(response, "Send failed")
+        if idempotency_key and data.get("duplicate") is True:
+            return None  # an earlier request with this key sent it
         message_id = data.get("message_id")
         if not isinstance(message_id, str) or not message_id:
             raise TextarooError(

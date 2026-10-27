@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import enum
 import logging
+import uuid
 from pathlib import Path
 
 import httpx
@@ -33,9 +34,10 @@ logger = logging.getLogger(__name__)
 # SMS character limit. Responses exceeding this are truncated.
 MAX_SMS_LENGTH = 1600
 
-# A text that almost certainly wasn't sent (the API couldn't be reached or
-# was restarting, or the per-minute limit) is tried again after each of
-# these delays, in seconds.
+# A text that didn't go through (the API couldn't be reached, was
+# restarting, didn't answer, or the per-minute limit) is tried again after
+# each of these delays, in seconds. Every try carries the text's own
+# Idempotency-Key, so the API sends it at most once.
 RETRY_DELAYS = (2.0, 5.0, 15.0)
 # The longest the bridge waits when the API says how long (retry_after).
 MAX_RETRY_AFTER = 60.0
@@ -43,14 +45,11 @@ MAX_RETRY_AFTER = 60.0
 # Texted in place of a reply the API refuses, so the owner isn't left waiting.
 REFUSED_NOTICE = "Sorry, my reply couldn't be sent. Try asking again?"
 
-# What the API's gateway answers while the API is down or restarting for a
-# deploy: the request almost certainly didn't reach it. Only if the API died
-# partway through sending can trying again text the owner twice.
-_NOT_REACHED = frozenset({502, 503})
 # No notice for these: the key doesn't work (401, 403; the stream stops too),
-# or a limit (429): the daily one, which the API texts the owner about
-# itself, or the per-minute one, already tried again.
-_NO_NOTICE = frozenset({401, 403, 429})
+# the text may have gone out already (409 send_in_doubt), or a limit (429):
+# the daily one, which the API texts the owner about itself, or the
+# per-minute one, already tried again.
+_NO_NOTICE = frozenset({401, 403, 409, 429})
 
 # Waits between tries (a seam for tests).
 _sleep = asyncio.sleep
@@ -237,11 +236,16 @@ class Bridge:
         return Delivery.UNKNOWN
 
     async def _try_send(self, text: str) -> Exception | None:
-        """Send, trying again while it almost certainly wasn't sent: the last error, or None."""
+        """Send, trying again while it didn't go through: the last error, or None once it's sent.
+
+        Every try carries the same Idempotency-Key, so the API sends the
+        text at most once, even when a try that seemed to fail got through.
+        """
+        key = uuid.uuid4().hex
         delays = list(RETRY_DELAYS)
         while True:
             try:
-                await self._client.send(text)
+                await self._client.send(text, idempotency_key=key)
                 return None
             except Exception as exc:  # cancellation isn't an Exception: it ends the bridge
                 if not delays or not _worth_retrying(exc):
@@ -252,11 +256,17 @@ class Bridge:
 
 
 def _worth_retrying(exc: Exception) -> bool:
-    """Whether a failed send almost certainly texted nobody, and may work in a moment."""
-    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
-        return True  # the request never left this machine
+    """Whether a failed send may work in a moment: the network, the API, or the per-minute limit.
+
+    Safe however far it got, since the API sends a text's Idempotency-Key
+    at most once. Not the carrier refusing the text: that's nearly always
+    for good.
+    """
+    if isinstance(exc, httpx.TransportError):
+        return not isinstance(exc, _NEVER_SENT)  # those fail again the same way
     return isinstance(exc, TextarooError) and (
-        exc.status_code in _NOT_REACHED or exc.code == "rate_limit_exceeded"
+        (exc.status_code >= 500 and exc.code != "carrier_error")
+        or exc.code == "rate_limit_exceeded"
     )
 
 
@@ -265,19 +275,19 @@ _NEVER_SENT = (httpx.LocalProtocolError, httpx.UnsupportedProtocol, httpx.Invali
 
 
 def _unsent(exc: Exception) -> bool:
-    """Whether a failed text (almost) certainly didn't go out.
+    """Whether a failed text certainly didn't go out.
 
-    It never got through, was redirected, the API turned it down before
-    sending (it answers every 4xx before the carrier gets the text), or the
-    carrier did.
+    It never left this machine, was redirected, the API turned it down
+    before sending (every 4xx but 409 send_in_doubt, which means it may
+    have gone out), the carrier refused it, or the API kept answering that
+    it couldn't take it (502, 503).
     """
-    return (
-        _worth_retrying(exc)
-        or isinstance(exc, _NEVER_SENT)
-        or (
-            isinstance(exc, TextarooError)
-            and (300 <= exc.status_code < 500 or exc.code == "carrier_error")
-        )
+    if isinstance(exc, (*_NEVER_SENT, httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
+        return True
+    return isinstance(exc, TextarooError) and (
+        (300 <= exc.status_code < 500 and exc.status_code != 409)
+        or exc.code in ("carrier_error", "rate_limit_exceeded")
+        or exc.status_code in (502, 503)
     )
 
 

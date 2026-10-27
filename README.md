@@ -106,9 +106,10 @@ Text `/help`, `/new` (fresh conversation) or `/status`. Use `--no-persist` for m
 history. Responses are stripped of markdown for SMS.
 
 When a reply doesn't go out:
-- **The API couldn't be reached, or was restarting for a deploy:** the bridge tries again three
-  times, 2, 5 and 15 seconds apart (longer, up to a minute, when the API asks it to wait). Very
-  rarely, if the API stopped partway through sending, you could get the reply twice.
+- **The API couldn't be reached, was restarting for a deploy, or didn't answer:** the bridge tries
+  again three times, 2, 5 and 15 seconds apart (longer, up to a minute, when the API asks it to
+  wait). Each reply carries its own Idempotency-Key, so the API sends it at most once: you never
+  get it twice, even if a try that seemed to fail got through.
 - **The API refused it:** you get "Sorry, my reply couldn't be sent" instead.
 - **Anything else** (the daily limit, a carrier error): the log says why.
 
@@ -156,11 +157,11 @@ asyncio.run(main())
 
 | Method | What it does |
 |---|---|
-| `send(text)` | Text the user. Returns the message ID. |
+| `send(text, idempotency_key=None)` | Text the user. Returns the message ID. With an `idempotency_key` (your own random ID for the text, the same on every retry), it's sent at most once: a retry of one that went out returns `None`, and one still sending or cut off raises `send_in_doubt`. |
 | `wait_for_reply(timeout_seconds=60)` | Wait up to 120 s for the user's next text (or one that arrived since your last send). Returns an `InboundMessage` or `None`. |
 | `recent_messages(after_id=None)` | Texts from the last five minutes. |
 | `listen()` | Async iterator over inbound texts via SSE, with automatic reconnect and replay. Raises `TextarooError` when reconnecting can't help: `unauthorized`, `credential_revoked` (the key was removed) or `evicted` (another stream took over the account). |
-| `text_contact(to, text, recipient_name=None)` | Pro: text someone else; their replies go to the user's phone for an hour after the last text to them. |
+| `text_contact(to, text, recipient_name=None, idempotency_key=None)` | Pro: text someone else; their replies go to the user's phone for an hour after the last text to them. `idempotency_key` as for `send`. |
 | `verify_pin(pin)` | Check a PIN the user texted: `{"verified": bool, "attempts_remaining": int \| None}`. |
 | `set_pin(pin, current_pin=None)` / `remove_pin(current_pin)` | Set the security PIN the user chose (4–8 digits), change it (needs `current_pin`), or remove it (needs the current PIN). The user is texted before any change. |
 | `set_webhook(url, auth_header=None, pin=None)` / `remove_webhook()` | Forward inbound texts to a URL (signed with `X-Signature`). `pin` is required if the user has one; the user is texted where their texts go and can reply `UNHOOK` to stop it. |
