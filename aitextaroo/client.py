@@ -215,6 +215,8 @@ class TextarooClient:
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = 30.0,
     ) -> None:
+        # A key copied with a stray newline can't go in a header (httpx refuses it).
+        api_key = api_key.strip() if isinstance(api_key, str) else api_key
         if not api_key:
             raise ValueError("api_key is required")
 

@@ -477,6 +477,14 @@ class TestAccount:
 
 
 class TestClientInit:
+    def test_a_stray_newline_in_the_key_is_dropped(self) -> None:
+        client = TextarooClient(api_key="key_123\r\n")
+        assert client._headers["Authorization"] == "Bearer key_123"
+
+    def test_a_blank_key_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="api_key is required"):
+            TextarooClient(api_key="  \n")
+
     def test_requires_api_key(self) -> None:
         with pytest.raises(ValueError, match="api_key is required"):
             TextarooClient(api_key="")
