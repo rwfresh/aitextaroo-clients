@@ -322,10 +322,14 @@ def sleeps(monkeypatch) -> list[float]:
     return waits
 
 
-def _bridge(*outcomes: object) -> tuple[Bridge, AsyncMock]:
-    """A bridge whose client's sends go these ways in turn (an exception, or a message id)."""
+def _bridge(*outcomes: object, keys_honored: bool | None = True) -> tuple[Bridge, AsyncMock]:
+    """A bridge whose client's sends go these ways in turn (an exception, or a message id).
+
+    keys_honored: whether the API has shown it sends an Idempotency-Key at most once.
+    """
     client = AsyncMock(spec=TextarooClient)
     client.send.side_effect = list(outcomes)
+    client.idempotency_supported = keys_honored
     return Bridge(client=client, agent=FakeAgent(response=REPLY)), client
 
 
@@ -438,6 +442,48 @@ class TestBridgeSendFailures:
 
         (record,) = [r for r in caplog.records if "may not have been sent" in r.getMessage()]
         assert record.exc_info is not None and record.exc_info[0] is RuntimeError
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("keys_honored", [None, False])
+    async def test_until_the_api_shows_it_honours_keys_a_maybe_sent_try_isnt_retried(
+        self, sleeps, keys_honored
+    ) -> None:
+        # An older API (a rollback, say) would send a retry again.
+        bridge, client = _bridge(
+            httpx.ReadTimeout("no answer"), "msg-1", keys_honored=keys_honored
+        )
+
+        await bridge._handle(_make_message("When's dinner?"))
+
+        assert _sent(client) == [REPLY]
+        assert bridge._conversation.count == 2  # it may have gone out
+
+    @pytest.mark.asyncio
+    async def test_a_try_that_certainly_failed_is_retried_either_way(self, sleeps) -> None:
+        bridge, client = _bridge(_api_error(502, "http_error"), "msg-1", keys_honored=None)
+
+        await bridge._handle(_make_message("When's dinner?"))
+
+        assert _sent(client) == [REPLY, REPLY]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("then", [
+        httpx.ConnectError("offline"),  # a laptop switching networks
+        _api_error(503, "http_error"),
+        _api_error(429, "rate_limit_exceeded"),
+    ])
+    async def test_a_reply_that_may_have_gone_out_once_stays_unknown(
+        self, sleeps, caplog, then
+    ) -> None:
+        # The first try timed out after the API sent it; the rest never got through.
+        bridge, client = _bridge(httpx.ReadTimeout("no answer"), *[then] * len(RETRY_DELAYS))
+
+        with caplog.at_level(logging.INFO, logger="aitextaroo.bridge"):
+            await bridge._handle(_make_message("When's dinner?"))
+
+        assert len(_sent(client)) == len(RETRY_DELAYS) + 1  # no "couldn't be sent" notice
+        assert bridge._conversation.count == 2  # the owner may have it
+        assert "A reply may not have been sent" in caplog.text
 
     @pytest.mark.asyncio
     async def test_a_duplicate_counts_as_sent(self, sleeps, caplog) -> None:
@@ -599,17 +645,20 @@ class TestBridgeSendFailuresOverHttp:
 
     @pytest.mark.asyncio
     async def test_a_lost_answer_is_retried_and_the_api_says_duplicate(self, sleeps) -> None:
-        # The API sent the text, then the answer never arrived (the proxy's 504).
+        # A first reply shows the API honours keys; the second is sent, but the
+        # answer never arrives (the proxy's 504).
+        sent = httpx.Response(200, json={"status": "sent", "message_id": "m1", "duplicate": False})
         timeout = httpx.Response(504, text="<html>Gateway Timeout</html>")
         duplicate = httpx.Response(
             200, json={"status": "sent", "message_id": None, "duplicate": True}
         )
-        bridge, texts = self._bridge(timeout, duplicate)
+        bridge, texts = self._bridge(sent, timeout, duplicate)
 
-        await bridge._handle(_make_message("When's dinner?"))
+        await bridge._handle(_make_message("Hi"))
+        await bridge._handle(_make_message("When's dinner?", msg_id="msg-2"))
 
-        assert texts == [REPLY, REPLY] and self.keys[0] == self.keys[1] is not None
-        assert bridge._conversation.count == 2
+        assert texts == [REPLY] * 3 and self.keys[1] == self.keys[2] != self.keys[0]
+        assert bridge._conversation.count == 4
 
     @pytest.mark.asyncio
     async def test_send_in_doubt_isnt_retried_or_apologized_for(self, sleeps) -> None:

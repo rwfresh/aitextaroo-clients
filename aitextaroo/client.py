@@ -73,6 +73,9 @@ STREAM_STOPS: dict[str, str] = {
     ),
 }
 
+# What the API takes as an Idempotency-Key.
+_IDEMPOTENCY_KEY = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
 # A connection id goes into the request path, so only these characters get
 # there: "../../webhook" would otherwise collapse into DELETE /v1/webhook.
 # The API itself answers "connection_not_found" for any id it doesn't know.
@@ -228,6 +231,9 @@ class TextarooClient:
         }
         self._client: httpx.AsyncClient | None = None
         self._last_event_id: str | None = None
+        # Whether the API has shown it honours Idempotency-Keys (its send
+        # answers say "duplicate" true or false), once a keyed send succeeds.
+        self.idempotency_supported: bool | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Lazily create the HTTP client."""
@@ -378,12 +384,16 @@ class TextarooClient:
         return await self._post_send(body, idempotency_key)
 
     async def _post_send(self, body: dict[str, Any], idempotency_key: str | None) -> str | None:
+        if idempotency_key is not None and not _IDEMPOTENCY_KEY.fullmatch(idempotency_key):
+            raise ValueError("idempotency_key must be 1 to 64 letters, digits, '-' or '_'")
         client = await self._get_client()
         headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
         response = await client.post("/v1/send", json=body, headers=headers)
         data = _parse_json_response(response, "Send failed")
-        if idempotency_key and data.get("duplicate") is True:
-            return None  # an earlier request with this key sent it
+        if idempotency_key:
+            self.idempotency_supported = "duplicate" in data
+            if data.get("duplicate") is True:
+                return None  # an earlier request with this key sent it
         message_id = data.get("message_id")
         if not isinstance(message_id, str) or not message_id:
             raise TextarooError(

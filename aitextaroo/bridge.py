@@ -216,57 +216,74 @@ class Bridge:
         One the API refuses is replaced with REFUSED_NOTICE, so the owner knows
         the reply isn't coming. Every failure is logged with the API's reason.
         """
-        error = await self._try_send(text)
+        error, may_have_gone_out = await self._try_send(text)
         if error is None:
             return Delivery.SENT
+        if may_have_gone_out:  # some try may have reached the API: no notice, keep the history
+            logger.error(
+                "A reply may not have been sent (%s)",
+                _reason(error),
+                exc_info=error if _unexpected(error) else None,
+            )
+            return Delivery.UNKNOWN
         if _refused(error):
             logger.error("The API refused a reply (%s); telling the owner", _reason(error))
-            notice_error = await self._try_send(REFUSED_NOTICE)
+            notice_error, _ = await self._try_send(REFUSED_NOTICE)
             if notice_error is not None:
                 logger.error("Couldn't text the owner that either (%s)", _reason(notice_error))
             return Delivery.UNSENT
-        if _unsent(error):
-            logger.error("Couldn't send a reply (%s)", _reason(error))
-            return Delivery.UNSENT
-        logger.error(
-            "A reply may not have been sent (%s)",
-            _reason(error),
-            exc_info=error if _unexpected(error) else None,
-        )
-        return Delivery.UNKNOWN
+        logger.error("Couldn't send a reply (%s)", _reason(error))
+        return Delivery.UNSENT
 
-    async def _try_send(self, text: str) -> Exception | None:
-        """Send, trying again while it didn't go through: the last error, or None once it's sent.
+    async def _try_send(self, text: str) -> tuple[Exception | None, bool]:
+        """Send, trying again while it didn't go through.
 
-        Every try carries the same Idempotency-Key, so the API sends the
-        text at most once, even when a try that seemed to fail got through.
+        Returns the last error (None once it's sent) and whether any failed
+        try may have reached the API, and so sent the text. Every try
+        carries the same Idempotency-Key, so the API sends it at most once.
         """
         key = uuid.uuid4().hex
         delays = list(RETRY_DELAYS)
+        may_have_gone_out = False
         while True:
             try:
                 await self._client.send(text, idempotency_key=key)
-                return None
+                return None, False
             except Exception as exc:  # cancellation isn't an Exception: it ends the bridge
-                if not delays or not _worth_retrying(exc):
-                    return exc
+                may_have_gone_out = may_have_gone_out or not _unsent(exc)
+                if not delays or not _worth_retrying(exc, self._keys_honored()):
+                    return exc, may_have_gone_out
                 wait = _retry_wait(exc, delays.pop(0))
                 logger.warning("Text not sent (%s); trying again in %g s", _reason(exc), wait)
                 await _sleep(wait)
 
+    def _keys_honored(self) -> bool:
+        """Whether the API has shown it sends a text's Idempotency-Key at most once."""
+        return getattr(self._client, "idempotency_supported", None) is True
 
-def _worth_retrying(exc: Exception) -> bool:
+
+def _worth_retrying(exc: Exception, keys_honored: bool) -> bool:
     """Whether a failed send may work in a moment: the network, the API, or the per-minute limit.
 
-    Safe however far it got, since the API sends a text's Idempotency-Key
-    at most once. Not the carrier refusing the text: that's nearly always
-    for good.
+    One that certainly didn't go out (it never reached the API, the API was
+    down or restarting, the carrier couldn't be reached, the per-minute
+    limit) is always tried again. One that may have gone out (no answer, a
+    500 or 504) only once the API has shown it honours Idempotency-Keys, so
+    a retry can't send it twice. Not the carrier refusing the text: that's
+    nearly always for good.
     """
+    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
+        return True
+    if isinstance(exc, TextarooError) and (
+        exc.status_code in (502, 503) or exc.code == "rate_limit_exceeded"
+    ):
+        return True
+    if not keys_honored:
+        return False
     if isinstance(exc, httpx.TransportError):
         return not isinstance(exc, _NEVER_SENT)  # those fail again the same way
-    return isinstance(exc, TextarooError) and (
-        (exc.status_code >= 500 and exc.code != "carrier_error")
-        or exc.code == "rate_limit_exceeded"
+    return (
+        isinstance(exc, TextarooError) and exc.status_code >= 500 and exc.code != "carrier_error"
     )
 
 
