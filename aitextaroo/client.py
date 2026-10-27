@@ -73,6 +73,9 @@ STREAM_STOPS: dict[str, str] = {
     ),
 }
 
+# What the API takes as an Idempotency-Key.
+_IDEMPOTENCY_KEY = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
 # A connection id goes into the request path, so only these characters get
 # there: "../../webhook" would otherwise collapse into DELETE /v1/webhook.
 # The API itself answers "connection_not_found" for any id it doesn't know.
@@ -228,6 +231,9 @@ class TextarooClient:
         }
         self._client: httpx.AsyncClient | None = None
         self._last_event_id: str | None = None
+        # Whether the API has shown it honours Idempotency-Keys (its send
+        # answers say "duplicate" true or false), once a keyed send succeeds.
+        self.idempotency_supported: bool | None = None
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Lazily create the HTTP client."""
@@ -322,21 +328,36 @@ class TextarooClient:
 
     # ── Outbound messaging ──────────────────────────────────────
 
-    async def send(self, text: str) -> str:
+    async def send(self, text: str, *, idempotency_key: str | None = None) -> str | None:
         """Send an SMS to the registered user.
 
         Args:
             text: Message body (max 1600 characters).
+            idempotency_key: Your own random ID for this text (1-64 letters,
+                digits, "-" or "_", e.g. uuid4().hex), the same on every
+                retry. However often you send it, the text goes out at most
+                once: a retry of one that went out returns None, and one an
+                earlier request is still sending, or that stopped partway,
+                raises TextarooError "send_in_doubt" (409). A key counts
+                for about a day.
 
         Returns:
-            The carrier message ID.
+            The carrier message ID, or None when an earlier request with
+            the same idempotency_key already sent it.
 
         Raises:
             TextarooError: If the API returns an error.
         """
-        return await self._post_send({"text": text})
+        return await self._post_send({"text": text}, idempotency_key)
 
-    async def text_contact(self, to: str, text: str, recipient_name: str | None = None) -> str:
+    async def text_contact(
+        self,
+        to: str,
+        text: str,
+        recipient_name: str | None = None,
+        *,
+        idempotency_key: str | None = None,
+    ) -> str | None:
         """Text someone else on the user's behalf (Pro plan).
 
         The contact sees the AI's number. Their replies are forwarded to
@@ -348,9 +369,11 @@ class TextarooClient:
             to: The contact's number in E.164 format (e.g., "+12125550100").
             text: Message body (max 1600 characters).
             recipient_name: Optional name used to label forwarded replies.
+            idempotency_key: As for send(): the text goes out at most once.
 
         Returns:
-            The carrier message ID.
+            The carrier message ID, or None when an earlier request with
+            the same idempotency_key already sent it.
 
         Raises:
             TextarooError: If the API returns an error ("tier_required" on Free).
@@ -358,12 +381,19 @@ class TextarooClient:
         body: dict[str, Any] = {"text": text, "to": to}
         if recipient_name:
             body["recipient_name"] = recipient_name
-        return await self._post_send(body)
+        return await self._post_send(body, idempotency_key)
 
-    async def _post_send(self, body: dict[str, Any]) -> str:
+    async def _post_send(self, body: dict[str, Any], idempotency_key: str | None) -> str | None:
+        if idempotency_key is not None and not _IDEMPOTENCY_KEY.fullmatch(idempotency_key):
+            raise ValueError("idempotency_key must be 1 to 64 letters, digits, '-' or '_'")
         client = await self._get_client()
-        response = await client.post("/v1/send", json=body)
+        headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
+        response = await client.post("/v1/send", json=body, headers=headers)
         data = _parse_json_response(response, "Send failed")
+        if idempotency_key:
+            self.idempotency_supported = "duplicate" in data
+            if data.get("duplicate") is True:
+                return None  # an earlier request with this key sent it
         message_id = data.get("message_id")
         if not isinstance(message_id, str) or not message_id:
             raise TextarooError(
