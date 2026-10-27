@@ -18,6 +18,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import math
 import re
 from collections.abc import AsyncIterator
 from typing import Any
@@ -37,6 +38,8 @@ logger = logging.getLogger(__name__)
 # Defaults
 DEFAULT_BASE_URL = "https://api.aitextaroo.com"
 DEFAULT_RECONNECT_DELAY = 3.0
+# The shortest and longest waits the server's retry_after can set.
+MIN_RECONNECT_DELAY = 1.0
 MAX_RECONNECT_DELAY = 60.0
 RECONNECT_BACKOFF_FACTOR = 2.0
 
@@ -77,12 +80,19 @@ _CONNECTION_ID = re.compile(r"(?:key|app)_[A-Za-z0-9_-]{1,100}")
 
 
 class TextarooError(Exception):
-    """Raised when an API call fails."""
+    """Raised when an API call fails.
 
-    def __init__(self, code: str, message: str, status_code: int = 0):
+    retry_after is the seconds the API asks you to wait before trying
+    again (its rate limits say), or None.
+    """
+
+    def __init__(
+        self, code: str, message: str, status_code: int = 0, retry_after: float | None = None
+    ):
         self.code = code
         self.message = message
         self.status_code = status_code
+        self.retry_after = _seconds(retry_after)
         super().__init__(f"{code}: {message}")
 
 
@@ -131,6 +141,7 @@ def _parse_json_response(response: httpx.Response, fallback_message: str) -> dic
             code=error.get("code", "unknown"),
             message=error.get("message", fallback_message),
             status_code=response.status_code,
+            retry_after=error.get("retry_after"),
         )
 
     if not isinstance(data, dict):
@@ -141,6 +152,17 @@ def _parse_json_response(response: httpx.Response, fallback_message: str) -> dic
         )
 
     return data
+
+
+def _seconds(value: object) -> float | None:
+    """A server's retry_after as seconds: a finite number, not negative (not a bool), else None."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        seconds = float(value)
+    except OverflowError:  # an integer too big for a float
+        return None
+    return seconds if 0 <= seconds < math.inf else None  # NaN fails both
 
 
 # Where FastAPI says a request field lives; the first entry of a validation "loc".
@@ -193,6 +215,8 @@ class TextarooClient:
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = 30.0,
     ) -> None:
+        # A key copied with a stray newline can't go in a header (httpx refuses it).
+        api_key = api_key.strip() if isinstance(api_key, str) else api_key
         if not api_key:
             raise ValueError("api_key is required")
 
@@ -640,7 +664,10 @@ class TextarooClient:
                                 raise TextarooError(code=event.error.code, message=stop)
                             logger.warning("Stream error: %s", event.error)
                             if event.error.retry_after:
-                                delay = float(event.error.retry_after)
+                                delay = min(
+                                    max(event.error.retry_after, MIN_RECONNECT_DELAY),
+                                    MAX_RECONNECT_DELAY,
+                                )
 
             # Every network failure, read timeouts included (ReadTimeout
             # isn't a ReadError): the connection is gone, so reconnect.
@@ -761,7 +788,7 @@ def _parse_event(
             error=ErrorEvent(
                 code=data.get("code", "unknown"),
                 message=data.get("message", ""),
-                retry_after=data.get("retry_after"),
+                retry_after=_seconds(data.get("retry_after")),
             ),
         )
 

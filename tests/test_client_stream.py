@@ -9,6 +9,8 @@ import pytest
 
 from aitextaroo.client import (
     DEFAULT_RECONNECT_DELAY,
+    MAX_RECONNECT_DELAY,
+    MIN_RECONNECT_DELAY,
     STREAM_READ_TIMEOUT,
     STREAM_STOPS,
     TextarooClient,
@@ -172,6 +174,31 @@ class TestStreamReconnects:
         assert len(seen) == 2
         assert seen[1].headers["Last-Event-ID"] == "m1"
         sleep.assert_awaited_once_with(7.0)
+        await client.close()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("retry_after", "wait"), [
+        (10**400, DEFAULT_RECONNECT_DELAY),  # too big for a float: ignored, not a crash
+        (-5, DEFAULT_RECONNECT_DELAY),
+        (86400, MAX_RECONNECT_DELAY),  # capped
+        (0.0001, MIN_RECONNECT_DELAY),  # never a hot reconnect loop
+    ])
+    async def test_an_odd_retry_after_never_stops_or_stalls_the_stream(
+        self, sleep, retry_after, wait
+    ) -> None:
+        restarting = (
+            "error",
+            None,
+            {"code": "server_restarting", "message": "Restarting.", "retry_after": retry_after},
+        )
+        client, _seen = _streaming_client(
+            _sse(CONNECTED, restarting),
+            _sse(CONNECTED, _message("m1", "after"), _error("evicted")),
+        )
+        texts, error = await _collect(client)
+        assert texts == ["after"]
+        assert error is not None and error.code == "evicted"
+        sleep.assert_awaited_once_with(wait)
         await client.close()
 
     @pytest.mark.asyncio

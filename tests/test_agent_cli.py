@@ -32,6 +32,17 @@ class TestCredentials:
         assert load_api_key(path=path) == "from_env"
         assert load_api_key("explicit", path=path) == "explicit"
 
+    def test_a_stray_newline_or_space_is_dropped(self, tmp_path, monkeypatch) -> None:
+        # A key set from a file with Windows line endings ends in "\r": in a
+        # header, httpx refuses it, and the bridge reconnected forever.
+        path = save_credentials(" from_file\r\n", path=tmp_path / "credentials.json")
+        monkeypatch.delenv("AITEXTAROO_API_KEY", raising=False)
+        assert load_api_key(path=path) == "from_file"
+        monkeypatch.setenv("AITEXTAROO_API_KEY", "from_env\r")
+        assert load_api_key(path=path) == "from_env"
+        assert load_api_key("  explicit\n", path=path) == "explicit"
+        assert load_api_key("   ", path=path) == "from_env"  # blank counts as not given
+
     def test_missing_or_corrupt_file(self, tmp_path, monkeypatch) -> None:
         monkeypatch.delenv("AITEXTAROO_API_KEY", raising=False)
         assert load_api_key(path=tmp_path / "nope.json") == ""

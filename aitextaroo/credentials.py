@@ -24,15 +24,17 @@ CREDENTIALS_PATH = Path.home() / ".aitextaroo" / "credentials.json"
 
 
 def load_api_key(explicit: str | None = None, path: Path | None = None) -> str:
-    """Return the first API key found, or an empty string."""
-    if explicit:
-        return explicit
-    from_env = os.environ.get(ENV_VAR, "")
-    if from_env:
-        return from_env
+    """Return the first API key found, or an empty string.
+
+    Surrounding whitespace is dropped: a key pasted with a newline, or set
+    from a file with Windows line endings, can't go in a request header.
+    """
+    for candidate in (explicit, os.environ.get(ENV_VAR)):
+        if candidate and candidate.strip():
+            return candidate.strip()
     data = load_credentials(path)
     key = data.get("api_key") if data else None
-    return key if isinstance(key, str) else ""
+    return key.strip() if isinstance(key, str) else ""
 
 
 def load_credentials(path: Path | None = None) -> dict | None:
