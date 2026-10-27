@@ -67,12 +67,13 @@ class ErrorEvent:
             reconnects on any other code.
         message: Human-readable description.
         retry_after: Seconds to wait before reconnecting, if the server says
-            (it does for "server_restarting").
+            (it does for "server_restarting"); None for anything that isn't
+            a finite, non-negative number.
     """
 
     code: str
     message: str
-    retry_after: int | None = None
+    retry_after: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

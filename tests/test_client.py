@@ -151,13 +151,20 @@ class TestParseJsonResponse:
             _parse_json_response(resp, "fail")
         assert exc_info.value.retry_after == 60
 
-    @pytest.mark.parametrize("retry_after", ['"60"', "true", "-1", "null", "[60]", "1e999"])
+    @pytest.mark.parametrize(
+        "retry_after", ['"60"', "true", "-1", "null", "[60]", "1e999", "NaN", "1" + "0" * 400]
+    )
     def test_an_unusable_retry_after_is_ignored(self, retry_after: str) -> None:
         error = f'{{"code": "rate_limit_exceeded", "message": "x", "retry_after": {retry_after}}}'
         resp = self._make_response(429, f'{{"error": {error}}}')
         with pytest.raises(TextarooError) as exc_info:
             _parse_json_response(resp, "fail")
         assert exc_info.value.retry_after is None
+
+    @pytest.mark.parametrize("retry_after", [10**400, float("nan"), float("inf"), -1, True, "60"])
+    def test_an_error_never_keeps_an_unusable_retry_after(self, retry_after: object) -> None:
+        error = TextarooError("x", "y", 429, retry_after=retry_after)  # type: ignore[arg-type]
+        assert error.retry_after is None
 
     def test_401_unauthorized(self) -> None:
         resp = self._make_response(401, '{"error": {"code": "unauthorized", "message": "Bad key"}}')

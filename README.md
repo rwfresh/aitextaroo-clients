@@ -105,11 +105,15 @@ Conversation history is saved locally in `~/.aitextaroo/sessions/` and survives 
 Text `/help`, `/new` (fresh conversation) or `/status`. Use `--no-persist` for memory-only
 history. Responses are stripped of markdown for SMS.
 
-A reply that can't go out isn't dropped silently. If nothing was sent (the API restarting for
-a deploy, say), the bridge tries three more times over about 20 seconds, waiting longer (up to
-a minute) when the API asks it to. If the API refuses the reply, you get "Sorry, my reply
-couldn't be sent" instead. Either way the log says why, and the exchange stays out of the
-history.
+When a reply doesn't go out:
+- **The API couldn't be reached, or was restarting for a deploy:** the bridge tries again three
+  times, a few seconds apart (longer, up to a minute, when the API asks it to wait). Very rarely,
+  if the API stopped partway through sending, you could get the reply twice.
+- **The API refused it:** you get "Sorry, my reply couldn't be sent" instead.
+- **Anything else** (the daily limit, a carrier error): the log says why.
+
+A reply that certainly didn't go out stays out of the history. Later texts wait while the
+bridge tries again.
 
 An account has one stream at a time: starting a second bridge, even with another key, stops
 the first. A bridge also stops when its key is removed from the account. Either way it says

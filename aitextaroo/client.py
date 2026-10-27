@@ -18,6 +18,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import math
 import re
 from collections.abc import AsyncIterator
 from typing import Any
@@ -89,7 +90,7 @@ class TextarooError(Exception):
         self.code = code
         self.message = message
         self.status_code = status_code
-        self.retry_after = retry_after
+        self.retry_after = _seconds(retry_after)
         super().__init__(f"{code}: {message}")
 
 
@@ -134,12 +135,11 @@ def _parse_json_response(response: httpx.Response, fallback_message: str) -> dic
             error = detail.get("error")
         if not isinstance(error, dict):
             error = _error_from_detail(detail, response.status_code)
-        retry_after = error.get("retry_after")
         raise TextarooError(
             code=error.get("code", "unknown"),
             message=error.get("message", fallback_message),
             status_code=response.status_code,
-            retry_after=retry_after if _is_seconds(retry_after) else None,
+            retry_after=error.get("retry_after"),
         )
 
     if not isinstance(data, dict):
@@ -152,11 +152,15 @@ def _parse_json_response(response: httpx.Response, fallback_message: str) -> dic
     return data
 
 
-def _is_seconds(value: object) -> bool:
-    """Whether a JSON value is a usable number of seconds (not a bool, not negative)."""
+def _seconds(value: object) -> float | None:
+    """A server's retry_after as seconds: a finite number, not negative (not a bool), else None."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return False
-    return 0 <= value < float("inf")
+        return None
+    try:
+        seconds = float(value)
+    except OverflowError:  # an integer too big for a float
+        return None
+    return seconds if 0 <= seconds < math.inf else None  # NaN fails both
 
 
 # Where FastAPI says a request field lives; the first entry of a validation "loc".
@@ -656,7 +660,7 @@ class TextarooClient:
                                 raise TextarooError(code=event.error.code, message=stop)
                             logger.warning("Stream error: %s", event.error)
                             if event.error.retry_after:
-                                delay = float(event.error.retry_after)
+                                delay = min(event.error.retry_after, MAX_RECONNECT_DELAY)
 
             # Every network failure, read timeouts included (ReadTimeout
             # isn't a ReadError): the connection is gone, so reconnect.
@@ -777,7 +781,7 @@ def _parse_event(
             error=ErrorEvent(
                 code=data.get("code", "unknown"),
                 message=data.get("message", ""),
-                retry_after=data.get("retry_after"),
+                retry_after=_seconds(data.get("retry_after")),
             ),
         )
 

@@ -1,6 +1,7 @@
 """Tests for the bridge orchestration."""
 
 import asyncio
+import json
 import logging
 from unittest.mock import AsyncMock
 
@@ -316,7 +317,7 @@ def sleeps(monkeypatch) -> list[float]:
     async def sleep(seconds: float) -> None:
         waits.append(seconds)
 
-    monkeypatch.setattr(bridge_module.asyncio, "sleep", sleep)
+    monkeypatch.setattr(bridge_module, "_sleep", sleep)
     return waits
 
 
@@ -342,7 +343,6 @@ class TestBridgeSendFailures:
     @pytest.mark.parametrize("failure", [
         _api_error(502, "http_error"),  # the API restarting for a deploy
         _api_error(503, "http_error"),
-        _api_error(500, "carrier_error"),  # the carrier turned it down: nothing was sent
         httpx.ConnectError("refused"),
         httpx.ConnectTimeout("slow"),
         httpx.PoolTimeout("busy"),
@@ -366,7 +366,7 @@ class TestBridgeSendFailures:
         # No notice: it couldn't get through either.
         assert _sent(client) == [REPLY] * (len(RETRY_DELAYS) + 1)
         assert sleeps == list(RETRY_DELAYS)
-        assert bridge._conversation.is_empty  # the owner never saw it
+        assert bridge._conversation.is_empty  # the owner never got it
         assert "Couldn't send a reply (http_error: http_error from the API)" in caplog.text
 
     @pytest.mark.asyncio
@@ -375,16 +375,31 @@ class TestBridgeSendFailures:
         httpx.RemoteProtocolError("cut off"),
         _api_error(504, "http_error"),
         _api_error(500, "internal_error"),
+        _api_error(200, "invalid_response"),
         RuntimeError("bug"),
     ])
-    async def test_a_text_that_may_have_gone_out_isnt_sent_twice(self, sleeps, failure) -> None:
+    async def test_a_text_that_may_have_gone_out_isnt_sent_twice(
+        self, sleeps, caplog, failure
+    ) -> None:
         bridge, client = _bridge(failure)
 
-        await bridge._handle(_make_message("When's dinner?"))
+        with caplog.at_level(logging.ERROR, logger="aitextaroo.bridge"):
+            await bridge._handle(_make_message("When's dinner?"))
 
         assert _sent(client) == [REPLY]
         assert sleeps == []
-        assert bridge._conversation.is_empty
+        assert bridge._conversation.count == 2  # the owner may have it
+        assert "A reply may not have been sent" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_an_unexpected_failure_logs_its_traceback(self, sleeps, caplog) -> None:
+        bridge, _client = _bridge(RuntimeError("bug"))
+
+        with caplog.at_level(logging.ERROR, logger="aitextaroo.bridge"):
+            await bridge._handle(_make_message("When's dinner?"))
+
+        (record,) = [r for r in caplog.records if "may not have been sent" in r.getMessage()]
+        assert record.exc_info is not None and record.exc_info[0] is RuntimeError
 
     @pytest.mark.asyncio
     async def test_a_refused_reply_is_replaced_with_a_notice(self, sleeps, caplog) -> None:
@@ -410,23 +425,38 @@ class TestBridgeSendFailures:
         assert "Couldn't text the owner that either (invalid_request" in caplog.text
 
     @pytest.mark.asyncio
+    async def test_a_refused_command_reply_gets_the_notice_too(self, sleeps) -> None:
+        bridge, client = _bridge(_api_error(422, "validation_error"), "msg-1")
+
+        await bridge._handle(_make_message("/help"))
+
+        assert _sent(client)[1] == REFUSED_NOTICE
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("failure", [
         _api_error(429, "daily_limit_reached"),  # the API texts the owner about this itself
         _api_error(401, "unauthorized"),  # the key stopped working: the stream ends too
-        _api_error(403, "credential_revoked"),
+        _api_error(403, "forbidden"),
+        _api_error(500, "carrier_error"),  # the carrier turned it down; it would again
     ])
-    async def test_no_notice_when_one_cant_help(self, sleeps, failure) -> None:
+    async def test_no_retry_or_notice_when_neither_can_help(self, sleeps, failure) -> None:
         bridge, client = _bridge(failure)
 
         await bridge._handle(_make_message("When's dinner?"))
 
         assert _sent(client) == [REPLY]
         assert sleeps == []
+        assert bridge._conversation.is_empty  # none of these sent anything
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        ("retry_after", "wait"), [(30, 30.0), (600, MAX_RETRY_AFTER), (None, RETRY_DELAYS[0])]
-    )
+    @pytest.mark.parametrize(("retry_after", "wait"), [
+        (30, 30.0),
+        (600, MAX_RETRY_AFTER),
+        (None, RETRY_DELAYS[0]),
+        (10**400, RETRY_DELAYS[0]),  # too big for a float: ignored
+        (float("nan"), RETRY_DELAYS[0]),
+        (-5, RETRY_DELAYS[0]),
+    ])
     async def test_the_per_minute_limit_waits_as_long_as_the_api_asks(
         self, sleeps, retry_after, wait
     ) -> None:
@@ -456,7 +486,7 @@ class TestBridgeSendFailures:
             slept.set()
             await asyncio.Event().wait()  # until cancelled
 
-        monkeypatch.setattr(bridge_module.asyncio, "sleep", sleep)
+        monkeypatch.setattr(bridge_module, "_sleep", sleep)
         bridge, client = _bridge(_api_error(503, "http_error"), "msg-1")
         task = asyncio.create_task(bridge._handle(_make_message("hi")))
         await slept.wait()
@@ -465,3 +495,58 @@ class TestBridgeSendFailures:
         with pytest.raises(asyncio.CancelledError):
             await task
         assert _sent(client) == [REPLY]
+
+
+class TestBridgeSendFailuresOverHttp:
+    """The same, through a real TextarooClient and the API's real error bodies."""
+
+    def _bridge(self, *responses: httpx.Response) -> tuple[Bridge, list[str]]:
+        pending = list(responses)
+        texts: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            texts.append(json.loads(request.content)["text"])
+            return pending.pop(0)
+
+        client = TextarooClient(api_key="test_key")
+        client._client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler), base_url="https://test.com"
+        )
+        return Bridge(client=client, agent=FakeAgent(response=REPLY)), texts
+
+    @pytest.mark.asyncio
+    async def test_the_gateways_502_page_is_tried_again(self, sleeps) -> None:
+        gateway = httpx.Response(502, text="<html>Application failed to respond</html>")
+        bridge, texts = self._bridge(gateway, httpx.Response(200, json=SENT))
+
+        await bridge._handle(_make_message("When's dinner?"))
+
+        assert texts == [REPLY, REPLY]
+        assert bridge._conversation.count == 2
+
+    @pytest.mark.asyncio
+    async def test_the_apis_refusal_gets_the_notice(self, sleeps) -> None:
+        refusal = httpx.Response(
+            422, json={"detail": [{"loc": ["body", "text"], "msg": "Value error, too long"}]}
+        )
+        bridge, texts = self._bridge(refusal, httpx.Response(200, json=SENT))
+
+        await bridge._handle(_make_message("When's dinner?"))
+
+        assert texts == [REPLY, REFUSED_NOTICE]
+
+    @pytest.mark.asyncio
+    async def test_the_per_minute_limit_waits_what_the_api_says(self, sleeps) -> None:
+        limited = httpx.Response(429, json={"error": {
+            "code": "rate_limit_exceeded", "message": "Per-minute rate limit exceeded.",
+            "retry_after": 60,
+        }})
+        bridge, texts = self._bridge(limited, httpx.Response(200, json=SENT))
+
+        await bridge._handle(_make_message("When's dinner?"))
+
+        assert texts == [REPLY, REPLY]
+        assert sleeps == [60.0]
+
+
+SENT = {"status": "sent", "message_id": "msg-1"}

@@ -32,9 +32,9 @@ logger = logging.getLogger(__name__)
 # SMS character limit. Responses exceeding this are truncated.
 MAX_SMS_LENGTH = 1600
 
-# A text that certainly wasn't sent (the API restarting for a deploy, the
-# carrier turning it down, the per-minute limit) is tried again after each
-# of these delays, in seconds. Nothing went out, so the owner can't get it twice.
+# A text that almost certainly wasn't sent (the API couldn't be reached or
+# was restarting, or the per-minute limit) is tried again after each of
+# these delays, in seconds.
 RETRY_DELAYS = (2.0, 5.0, 15.0)
 # The longest the bridge waits when the API says how long (retry_after).
 MAX_RETRY_AFTER = 60.0
@@ -42,13 +42,17 @@ MAX_RETRY_AFTER = 60.0
 # Texted in place of a reply the API refuses, so the owner isn't left waiting.
 REFUSED_NOTICE = "Sorry, my reply couldn't be sent. Try asking again?"
 
-# What the API's gateway answers while the API restarts: the request never reached it.
+# What the API's gateway answers while the API is down or restarting for a
+# deploy: the request almost certainly didn't reach it. Only if the API died
+# partway through sending can trying again text the owner twice.
 _NOT_REACHED = frozenset({502, 503})
-# The API sends nothing before these: the carrier turned the text down, or a limit.
-_NOT_SENT = frozenset({"carrier_error", "rate_limit_exceeded"})
-# Statuses where a notice can't help: the key doesn't work, or a limit the API
-# already texts the owner about.
+# No notice for these: the key doesn't work (401, 403; the stream stops too),
+# or a limit (429): the daily one, which the API texts the owner about
+# itself, or the per-minute one, already tried again.
 _NO_NOTICE = frozenset({401, 403, 429})
+
+# Waits between tries (a seam for tests).
+_sleep = asyncio.sleep
 
 
 class Bridge:
@@ -59,8 +63,9 @@ class Bridge:
     2. If it's a /command, handle locally (no agent call).
     3. Otherwise, build full prompt (system + history + message).
     4. Send to agent, get response.
-    5. Record both messages in conversation history.
-    6. Format the response for SMS and send it back.
+    5. Format the response for SMS and send it back.
+    6. Record both messages in conversation history, unless the reply
+       certainly didn't go out.
 
     The bridge owns prompt construction — the agent just receives
     a complete prompt and returns a response. This keeps system
@@ -162,8 +167,9 @@ class Bridge:
         if not await self._send(formatted):
             return
 
-        # Record both sides only once the reply went out, so the history
-        # matches what the owner saw (and has no orphaned user messages).
+        # Record both sides unless the reply certainly didn't go out, so the
+        # history holds only replies the owner got (or may have got), and
+        # no orphaned user messages.
         self._conversation.add_user_message(text)
         self._conversation.add_assistant_message(response)
         self._commands.increment_message_count()
@@ -194,10 +200,10 @@ class Bridge:
         return "\n\n".join(parts)
 
     async def _send(self, text: str) -> bool:
-        """Text the owner; returns whether it went out. Never raises (but can be cancelled).
+        """Text the owner: False only if it certainly didn't go out. Only cancellation escapes.
 
-        A text that certainly wasn't sent is tried again (RETRY_DELAYS). One
-        the API refuses is replaced with REFUSED_NOTICE, so the owner knows
+        A text that almost certainly wasn't sent is tried again (RETRY_DELAYS).
+        One the API refuses is replaced with REFUSED_NOTICE, so the owner knows
         the reply isn't coming. Every failure is logged with the API's reason.
         """
         error = await self._try_send(text)
@@ -208,31 +214,50 @@ class Bridge:
             notice_error = await self._try_send(REFUSED_NOTICE)
             if notice_error is not None:
                 logger.error("Couldn't text the owner that either (%s)", _reason(notice_error))
-        else:
-            logger.error("Couldn't send a reply (%s)", _reason(error), exc_info=_unexpected(error))
-        return False
+            return False
+        if _unsent(error):
+            logger.error("Couldn't send a reply (%s)", _reason(error))
+            return False
+        logger.error(
+            "A reply may not have been sent (%s)",
+            _reason(error),
+            exc_info=error if _unexpected(error) else None,
+        )
+        return True  # the owner may have it
 
     async def _try_send(self, text: str) -> Exception | None:
-        """Send, trying again while nothing was sent: the last error, or None once it's sent."""
+        """Send, trying again while it almost certainly wasn't sent: the last error, or None."""
         delays = list(RETRY_DELAYS)
         while True:
             try:
                 await self._client.send(text)
                 return None
             except Exception as exc:  # cancellation isn't an Exception: it ends the bridge
-                if not delays or not _nothing_sent(exc):
+                if not delays or not _worth_retrying(exc):
                     return exc
                 wait = _retry_wait(exc, delays.pop(0))
                 logger.warning("Text not sent (%s); trying again in %g s", _reason(exc), wait)
-                await asyncio.sleep(wait)
+                await _sleep(wait)
 
 
-def _nothing_sent(exc: Exception) -> bool:
-    """Whether a failed send certainly texted nobody, so trying again can't text the owner twice."""
+def _worth_retrying(exc: Exception) -> bool:
+    """Whether a failed send almost certainly texted nobody, and may work in a moment."""
     if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
         return True  # the request never left this machine
     return isinstance(exc, TextarooError) and (
-        exc.status_code in _NOT_REACHED or exc.code in _NOT_SENT
+        exc.status_code in _NOT_REACHED or exc.code == "rate_limit_exceeded"
+    )
+
+
+def _unsent(exc: Exception) -> bool:
+    """Whether a failed text (almost) certainly didn't go out.
+
+    It never got through, the API turned it down before sending (it answers
+    every 4xx before the carrier gets the text), or the carrier did.
+    """
+    return _worth_retrying(exc) or (
+        isinstance(exc, TextarooError)
+        and (400 <= exc.status_code < 500 or exc.code == "carrier_error")
     )
 
 
@@ -248,7 +273,7 @@ def _refused(exc: Exception) -> bool:
 def _retry_wait(exc: Exception, delay: float) -> float:
     """Seconds before the next try: what the API asked for (up to MAX_RETRY_AFTER), else delay."""
     retry_after = exc.retry_after if isinstance(exc, TextarooError) else None
-    return delay if retry_after is None else min(max(float(retry_after), delay), MAX_RETRY_AFTER)
+    return delay if retry_after is None else min(max(retry_after, delay), MAX_RETRY_AFTER)
 
 
 def _reason(exc: Exception) -> str:
