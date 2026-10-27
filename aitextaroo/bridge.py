@@ -289,8 +289,8 @@ def _worth_retrying(exc: Exception, keys_honored: bool) -> bool:
     down or restarting, the carrier couldn't be reached, the per-minute
     limit) is always tried again. One that may have gone out (no answer, a
     500 or 504) only once the API has shown it honours Idempotency-Keys, so
-    a retry can't send it twice. Not the carrier refusing the text: that's
-    nearly always for good.
+    a retry can't send it twice. Never the carrier's own answers
+    (_CARRIER_FINAL): asking again changes neither.
     """
     if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
         return True
@@ -303,8 +303,15 @@ def _worth_retrying(exc: Exception, keys_honored: bool) -> bool:
     if isinstance(exc, httpx.TransportError):
         return not isinstance(exc, _NEVER_SENT)  # those fail again the same way
     return (
-        isinstance(exc, TextarooError) and exc.status_code >= 500 and exc.code != "carrier_error"
+        isinstance(exc, TextarooError)
+        and exc.status_code >= 500
+        and exc.code not in _CARRIER_FINAL
     )
+
+
+# The carrier's own answers: refused for good, or failed after it got the
+# text (it may have gone out). Asking again changes neither.
+_CARRIER_FINAL = frozenset({"carrier_error", "carrier_in_doubt"})
 
 
 # Raised before a request is sent: a header or URL httpx won't send.

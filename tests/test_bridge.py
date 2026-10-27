@@ -406,6 +406,7 @@ class TestBridgeSendFailures:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("failure", [
+        _api_error(500, "carrier_in_doubt"),  # the carrier failed after it got the text
         _api_error(200, "invalid_response"),
         RuntimeError("bug"),
     ])
