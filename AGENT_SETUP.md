@@ -4,8 +4,9 @@ AI Text-a-roo is an SMS gateway for AI agents. It gives an agent its own phone
 number: the user texts it from any phone (no app), and the agent can text the
 user back, or first. Message content is never stored.
 
-Setup needs two things from the user: their US or Canadian mobile number, and
-the 6-digit code that AI Text-a-roo texts to it. The agent can do the rest.
+Setup needs two things from the user: their Canadian mobile number (US numbers
+are coming soon), and the 6-digit code that AI Text-a-roo texts to it. The agent
+can do the rest.
 Pick the path that matches the environment.
 
 - Agent Skill: [`skills/aitextaroo/SKILL.md`](skills/aitextaroo/SKILL.md) (also at https://aitextaroo.com/skills/aitextaroo/SKILL.md)
@@ -35,16 +36,16 @@ https://api.aitextaroo.com/mcp
    pipx install aitextaroo        # or: pip install --user aitextaroo
    ```
 
-2. Ask the user for their mobile number in international format (for example +12125551234), then request a code:
+2. Ask the user for their mobile number in international format (for example +14165550123), then request a code:
 
    ```bash
-   aitextaroo-setup --phone +12125551234
+   aitextaroo-setup --phone +14165550123
    ```
 
 3. Ask the user for the 6-digit code they received (valid for 5 minutes), then confirm it and save the key:
 
    ```bash
-   aitextaroo-setup --phone +12125551234 --code 123456 --save
+   aitextaroo-setup --phone +14165550123 --code 123456 --save
    ```
 
    `--save` stores the API key in `~/.aitextaroo/credentials.json` with owner-only
@@ -72,7 +73,7 @@ Everyday commands (JSON output):
 aitextaroo send "Build finished: 318 tests passing."
 aitextaroo ask "Deploy to production? Reply YES or NO" --timeout 120   # text, then wait for the answer
 aitextaroo recent                                                       # texts from the last 5 minutes
-aitextaroo relay --to +12125550100 --name Mom "Happy birthday!"        # Pro
+aitextaroo relay --to +16135550100 --name Mom "Happy birthday!"        # Pro
 aitextaroo verify-pin             # asks for the PIN without echoing; exits 2 if wrong
 aitextaroo account
 aitextaroo connections            # keys and app sign-ins on the account; "current" is you

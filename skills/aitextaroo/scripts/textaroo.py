@@ -3,12 +3,12 @@
 
 Text your user and read their replies through https://aitextaroo.com.
 
-    textaroo.py signup --phone +12125551234
-    textaroo.py confirm --phone +12125551234 --code 123456 [--label "Claude on studio-mac"]
+    textaroo.py signup --phone +14165550123
+    textaroo.py confirm --phone +14165550123 --code 123456 [--label "Claude on studio-mac"]
     textaroo.py send "Build finished. Open a PR?"
     textaroo.py wait --timeout 90
     textaroo.py recent [--after-id ID]
-    textaroo.py relay --to +12125550100 --name Mom "Happy birthday!"
+    textaroo.py relay --to +16135550100 --name Mom "Happy birthday!"
     textaroo.py verify-pin <<< 4821
     textaroo.py set-pin <<< 4821
     printf '1111\n4821\n' | textaroo.py set-pin --current   # change it: current, then new
@@ -146,7 +146,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("signup", help="Text a 6-digit verification code to the user's phone")
-    p.add_argument("--phone", required=True, help="E.164, e.g. +12125551234")
+    p.add_argument("--phone", required=True, help="E.164, e.g. +14165550123")
 
     p = sub.add_parser(
         "confirm", help="Confirm the code; adds a key and prints it with the assigned number"

@@ -6,8 +6,8 @@ Base URL: `https://api.aitextaroo.com/v1`. Authenticated endpoints need `Authori
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| POST | `/auth/verify` | `{"phone": "+12125551234"}` | `{"status": "code_sent", "expires_in": 300}` |
-| POST | `/auth/confirm` | `{"phone": "+12125551234", "code": "123456", "label": "Claude on studio-mac"}` | `{"api_key", "key_id", "assigned_number", "tier", "note", "retired"}` |
+| POST | `/auth/verify` | `{"phone": "+14165550123"}` | `{"status": "code_sent", "expires_in": 300}` |
+| POST | `/auth/confirm` | `{"phone": "+14165550123", "code": "123456", "label": "Claude on studio-mac"}` | `{"api_key", "key_id", "assigned_number", "tier", "note", "retired"}` |
 
 Each confirmation adds a key named `label` (optional, 1–40 letters, digits, spaces or `. _ ( ) ' @ # : + -`; default "API key"). If the account already exists, its other keys, app sign-ins and forwarding keep working, and the user is texted that a key was added. Up to 10 keys: an 11th removes the one unused the longest (never the one that forwards the user's texts when another can go), and the user is texted which. `note` says first what changed, and `retired` lists any key removed: `[{"id": "key_…", "label": "…", "forwarding_stopped": "<host>" | null}]`, usually `[]`.
 

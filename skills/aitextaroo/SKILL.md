@@ -83,7 +83,7 @@ Each new key (from `aitextaroo-setup`, `scripts/textaroo.py confirm`, or "Create
 
 ## Texting other people (Pro)
 
-Only text a contact when the user explicitly asks, and say who the message is from. Use E.164 numbers (+12125551234) and pass `recipient_name` so replies are labeled. Their replies are forwarded to the user's phone for an hour after you (or the user, with `>`) last texted them; their own texts don't extend that hour. Each forwarded reply ends "Reply with > to answer": the user answers a contact directly by starting a text with `>`. Your text, their replies and the user's `>` answers all count toward the daily limit. Relays are one-to-one: never use them for bulk or marketing messages.
+Only text a contact when the user explicitly asks, and say who the message is from. Use E.164 numbers (+14165550123) and pass `recipient_name` so replies are labeled. Their replies are forwarded to the user's phone for an hour after you (or the user, with `>`) last texted them; their own texts don't extend that hour. Each forwarded reply ends "Reply with > to answer": the user answers a contact directly by starting a text with `>`. Your text, their replies and the user's `>` answers all count toward the daily limit. Relays are one-to-one: never use them for bulk or marketing messages.
 
 ## Questions about how it works
 
@@ -105,6 +105,7 @@ If the user asks how AI Text-a-roo works, what it stores, or how it's secured, c
 - `rate_limit_exceeded`: more than 5 texts in a minute, or too many PIN, forwarding or connection changes in an hour or a day; wait and try again later.
 - Relay rejected: texting contacts needs Pro. Offer `get_upgrade_link`.
 - `recipient_not_allowed`: that number has its own AI Text-a-roo account on the same number, so it can't be texted as a contact.
+- `unsupported_region`: AI Text-a-roo can't text numbers in that country yet, so nothing was sent. US numbers are coming soon (US carriers require a registration we haven't finished).
 - `pin_required` / `current_pin_required`: ask the user for their PIN (or current PIN) and try again with it. `pin_locked`: too many wrong tries; wait a few minutes (or a day after 10). If the user forgot their PIN, they can remove it on the dashboard (that always works), then set a new one.
 - `pin_conflict`: the PIN changed while you were working (maybe the user changed it); check `get_account` and try again.
 - `owner_notice_failed`: AI Text-a-roo couldn't text the user about a security change, so nothing changed; try again in a minute. `temporarily_unavailable`: security checks are down for a moment, so nothing changed; try again in a minute.

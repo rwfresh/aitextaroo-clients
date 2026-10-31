@@ -5,7 +5,7 @@ Usage:
     aitextaroo ask "Deploy to production? Reply YES or NO" --timeout 120
     aitextaroo wait --timeout 60
     aitextaroo recent [--after-id ID]
-    aitextaroo relay --to +12125550100 --name Mom "Happy birthday!"
+    aitextaroo relay --to +16135550100 --name Mom "Happy birthday!"
     aitextaroo verify-pin <<< 4821
     aitextaroo set-pin <<< 4821
     aitextaroo set-pin --current           # change it: current PIN, then the new one
@@ -250,7 +250,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument("--after-id", default=None, help="Only texts after this message id")
 
     p = sub.add_parser("relay", help="Text a contact on the user's behalf (Pro)")
-    p.add_argument("--to", required=True, help="Contact's number, E.164 (e.g. +12125550100)")
+    p.add_argument("--to", required=True, help="Contact's number, E.164 (e.g. +16135550100)")
     p.add_argument("--name", default=None, help="Contact's name, used to label their replies")
     p.add_argument("text")
 
