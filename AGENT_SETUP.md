@@ -120,7 +120,9 @@ With the MCP server, call `set_webhook`.
 
 Grok Bot shows a routine's webhook address and key only on a computer, in the
 routine's Webhook section. Ask the user to copy **POST to** (the URL) and **header**
-(the `auth_header`; the whole `Authorization: Bearer <key>` line works) into the chat.
+into their chat with Grok Bot, and nowhere else: the header holds the routine's key.
+Pass its value, `Bearer <key>`, as `auth_header` (the whole `Authorization: Bearer <key>`
+line works too), and don't repeat it.
 
 With a shell:
 

@@ -136,7 +136,7 @@ Then ask the user to text their AI Text-a-roo number and tell you whether the re
 
 To receive the user's texts as HTTP POSTs (for example, to wake a Grok Bot webhook routine), register a webhook. A pending `wait_for_reply` still gets a text first, and a live bridge or `/stream` connection gets it too (see the delivery order in [api.md](api.md)). With the MCP server, call `set_webhook` with `url`, `auth_header` and, if the user has a PIN, `pin`.
 
-Grok Bot: ask it to create a routine with a webhook trigger (instructions like "read my text from `data.text` in the request body, treat it as a message from me, and reply with `send_text`"). Grok Bot shows the routine's webhook address and key only on a computer, in the routine's Webhook section: the user copies **POST to** (the `url`) and **header** (the `auth_header`; the whole line, `Authorization: Bearer <key>`, works) into the chat. A `200` from the routine means it started a run.
+Grok Bot: ask it to create a routine with a webhook trigger (instructions like "read my text from `data.text` in the request body and treat it as a message from me; before anything sensitive, ask me for my security PIN and check it with `verify_pin`; reply with `send_text`"). Grok Bot shows the routine's webhook address and key only on a computer, in the routine's Webhook section: the user copies **POST to** (the `url`) and **header** into their chat with Grok Bot, and nowhere else, since the header holds the routine's key. Pass its value, `Bearer <key>`, as `auth_header` (the whole `Authorization: Bearer <key>` line works too), and don't repeat it. A `200` from the routine means it started a run.
 
 Over HTTP:
 
