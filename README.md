@@ -34,8 +34,8 @@ Or just tell your agent:
 
 ```bash
 pipx install aitextaroo                                      # or: pip install --user aitextaroo
-aitextaroo-setup --phone +12125551234                        # texts you a 6-digit code
-aitextaroo-setup --phone +12125551234 --code 123456 --save   # saves the key (owner-only)
+aitextaroo-setup --phone +14165550123                        # texts you a 6-digit code
+aitextaroo-setup --phone +14165550123 --code 123456 --save   # saves the key (owner-only)
 aitextaroo send "Hello from my agent!"
 ```
 

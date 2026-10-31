@@ -15,16 +15,16 @@ During sign-in the user enters their phone number and the code texted to it, the
 
 ## B. Agents that can run commands or make HTTP requests
 
-1. Ask the user for their mobile number in international format, for example +12125551234. Sign-up currently supports US and Canadian (+1) mobile numbers.
+1. Ask the user for their mobile number in international format, for example +14165550123. Sign-up currently supports Canadian (+1) mobile numbers. US numbers are coming soon: AI Text-a-roo can't text them yet, so sign-up refuses them with `unsupported_region`.
 2. Request a code:
-   - With the package: `aitextaroo-setup --phone +12125551234`
-   - Script: `python3 scripts/textaroo.py signup --phone +12125551234`
-   - HTTP: `POST https://api.aitextaroo.com/v1/auth/verify` with `{"phone": "+12125551234"}`
+   - With the package: `aitextaroo-setup --phone +14165550123`
+   - Script: `python3 scripts/textaroo.py signup --phone +14165550123`
+   - HTTP: `POST https://api.aitextaroo.com/v1/auth/verify` with `{"phone": "+14165550123"}`
 3. Ask the user for the 6-digit code they just received (it expires in 5 minutes).
 4. Confirm it:
-   - With the package: `aitextaroo-setup --phone +12125551234 --code 123456 --save` (stores the key in `~/.aitextaroo/credentials.json`, owner-only, where `aitextaroo` and the bridge find it)
-   - Script: `python3 scripts/textaroo.py confirm --phone +12125551234 --code 123456`
-   - HTTP: `POST https://api.aitextaroo.com/v1/auth/confirm` with `{"phone": "+12125551234", "code": "123456", "label": "Claude on studio-mac"}`
+   - With the package: `aitextaroo-setup --phone +14165550123 --code 123456 --save` (stores the key in `~/.aitextaroo/credentials.json`, owner-only, where `aitextaroo` and the bridge find it)
+   - Script: `python3 scripts/textaroo.py confirm --phone +14165550123 --code 123456`
+   - HTTP: `POST https://api.aitextaroo.com/v1/auth/confirm` with `{"phone": "+14165550123", "code": "123456", "label": "Claude on studio-mac"}`
    - `label` names the key on the dashboard and in the text the user gets: 1–40 letters, digits, spaces or `. _ ( ) ' @ # : + -`. `aitextaroo-setup` and the script take `--label`; by default they use "aitextaroo on <computer name>" and "aitextaroo skill on <computer name>".
    - The response contains `api_key`, `key_id`, `assigned_number`, `tier`, a `note` saying what changed, and `retired` (any key removed to stay at 10; usually none).
 5. Store the API key somewhere you can read in future sessions (a secrets store, a config file only the user can read, or the `AITEXTAROO_API_KEY` environment variable). It's shown once and can't be retrieved later. Confirming a code for a phone that already has an account adds another key: the account's other keys, app sign-ins and forwarding keep working, and the user gets a text saying a key was added. An account holds up to 10 keys; adding an 11th removes the one unused the longest (never the one that forwards the user's texts), and the user is texted which.
@@ -45,8 +45,8 @@ The bridge is a small program that keeps one outbound connection to AI Text-a-ro
 
 ```
 pipx install aitextaroo            # or: pip install --user aitextaroo
-aitextaroo-setup --phone +12125551234
-aitextaroo-setup --phone +12125551234 --code 123456 --save
+aitextaroo-setup --phone +14165550123
+aitextaroo-setup --phone +14165550123 --code 123456 --save
 nohup aitextaroo-bridge > ~/aitextaroo.log 2>&1 &
 ```
 
