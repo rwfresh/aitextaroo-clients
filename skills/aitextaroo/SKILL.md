@@ -105,7 +105,7 @@ If the user asks how AI Text-a-roo works, what it stores, or how it's secured, c
 - `rate_limit_exceeded`: more than 5 texts in a minute, or too many PIN, forwarding or connection changes in an hour or a day; wait and try again later.
 - Relay rejected: texting contacts needs Pro. Offer `get_upgrade_link`.
 - `recipient_not_allowed`: that number has its own AI Text-a-roo account on the same number, so it can't be texted as a contact.
-- `unsupported_region`: AI Text-a-roo can't text numbers in that country yet, so nothing was sent. US numbers are coming soon (US carriers need a registration that's still being approved).
+- `unsupported_region`: AI Text-a-roo can't text numbers in that country yet, so nothing was sent. US numbers are coming soon (US carriers require a registration we haven't finished).
 - `pin_required` / `current_pin_required`: ask the user for their PIN (or current PIN) and try again with it. `pin_locked`: too many wrong tries; wait a few minutes (or a day after 10). If the user forgot their PIN, they can remove it on the dashboard (that always works), then set a new one.
 - `pin_conflict`: the PIN changed while you were working (maybe the user changed it); check `get_account` and try again.
 - `owner_notice_failed`: AI Text-a-roo couldn't text the user about a security change, so nothing changed; try again in a minute. `temporarily_unavailable`: security checks are down for a moment, so nothing changed; try again in a minute.

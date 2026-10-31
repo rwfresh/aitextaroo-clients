@@ -264,7 +264,7 @@ class TextarooClient:
         creating a TextarooClient.
 
         Args:
-            phone: Phone number in E.164 format (e.g., "+12125551234").
+            phone: Phone number in E.164 format (e.g., "+14165550123").
             base_url: API base URL.
 
         Returns:

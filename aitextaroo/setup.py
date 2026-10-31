@@ -10,9 +10,9 @@ one that forwards the owner's texts); the output says which.
 
 Usage:
     aitextaroo-setup
-    aitextaroo-setup --phone +12125551234
-    aitextaroo-setup --phone +12125551234 --code 123456
-    aitextaroo-setup --phone +12125551234 --code 123456 --label "Bridge on studio-mac"
+    aitextaroo-setup --phone +14165550123
+    aitextaroo-setup --phone +14165550123 --code 123456
+    aitextaroo-setup --phone +14165550123 --code 123456 --label "Bridge on studio-mac"
 """
 
 from __future__ import annotations
@@ -99,7 +99,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--phone",
-        help="Phone number in E.164 format (e.g., +12125551234)",
+        help="Phone number in E.164 format (e.g., +14165550123)",
     )
     parser.add_argument(
         "--code",
@@ -135,7 +135,7 @@ def _interactive_setup(base_url: str, save: bool = False, label: str | None = No
     print("=" * 40)
     print()
 
-    phone = input("Enter your phone number (E.164 format, e.g., +12125551234): ").strip()
+    phone = input("Enter your phone number (E.164 format, e.g., +14165550123): ").strip()
     if not phone:
         _exit_error("Phone number is required.")
 
