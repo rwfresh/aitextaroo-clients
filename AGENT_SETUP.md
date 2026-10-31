@@ -73,7 +73,7 @@ Everyday commands (JSON output):
 aitextaroo send "Build finished: 318 tests passing."
 aitextaroo ask "Deploy to production? Reply YES or NO" --timeout 120   # text, then wait for the answer
 aitextaroo recent                                                       # texts from the last 5 minutes
-aitextaroo relay --to +12125550100 --name Mom "Happy birthday!"        # Pro
+aitextaroo relay --to +16135550100 --name Mom "Happy birthday!"        # Pro
 aitextaroo verify-pin             # asks for the PIN without echoing; exits 2 if wrong
 aitextaroo account
 aitextaroo connections            # keys and app sign-ins on the account; "current" is you

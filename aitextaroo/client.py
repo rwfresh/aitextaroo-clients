@@ -366,7 +366,7 @@ class TextarooClient:
         They count toward the daily limit, and stop once 80% of it is used.
 
         Args:
-            to: The contact's number in E.164 format (e.g., "+12125550100").
+            to: The contact's number in E.164 format (e.g., "+16135550100").
             text: Message body (max 1600 characters).
             recipient_name: Optional name used to label forwarded replies.
             idempotency_key: As for send(): the text goes out at most once.

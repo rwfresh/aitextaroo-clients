@@ -61,7 +61,7 @@ aitextaroo send "Build finished: 318 tests passing."
 aitextaroo ask "Deploy to production? Reply YES or NO" --timeout 120   # text, then wait for the answer
 aitextaroo wait --timeout 60                                            # wait for the next text
 aitextaroo recent                                                       # texts from the last 5 minutes
-aitextaroo relay --to +12125550100 --name Mom "Happy birthday!"        # Pro: text a contact
+aitextaroo relay --to +16135550100 --name Mom "Happy birthday!"        # Pro: text a contact
 aitextaroo verify-pin                                                   # check a PIN (hidden prompt)
 aitextaroo set-pin                                                      # set the user's PIN (4-8 digits)
 aitextaroo set-pin --current                                            # change it: current PIN, then the new one

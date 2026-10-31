@@ -8,7 +8,7 @@ Text your user and read their replies through https://aitextaroo.com.
     textaroo.py send "Build finished. Open a PR?"
     textaroo.py wait --timeout 90
     textaroo.py recent [--after-id ID]
-    textaroo.py relay --to +12125550100 --name Mom "Happy birthday!"
+    textaroo.py relay --to +16135550100 --name Mom "Happy birthday!"
     textaroo.py verify-pin <<< 4821
     textaroo.py set-pin <<< 4821
     printf '1111\n4821\n' | textaroo.py set-pin --current   # change it: current, then new
