@@ -404,6 +404,7 @@ class TestConnect:
         out = " ".join(capsys.readouterr().out.split())
         assert "only on a computer" in out and "copy POST to and header into your chat" in out
         assert "aitextaroo-bridge --agent grok" in out
+        assert "what to tell it: https://aitextaroo.com/agents/grok-bot" in out
 
     def test_never_prints_a_real_key(self, capsys, monkeypatch) -> None:
         monkeypatch.setenv("AITEXTAROO_API_KEY", "secret_key_value")
