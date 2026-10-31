@@ -398,6 +398,14 @@ class TestConnect:
         assert "codex mcp add aitextaroo" in out
         assert "Cursor" not in out
 
+    def test_grok_says_where_the_routine_address_and_key_are(self, capsys) -> None:
+        # Grok Bot can't see them itself: the user copies them from the routine on a computer.
+        agent_cli.main(["connect", "grok"])
+        out = " ".join(capsys.readouterr().out.split())
+        assert "only on a computer" in out and "copy POST to and header into your chat" in out
+        assert "aitextaroo-bridge --agent grok" in out
+        assert "what to tell it: https://aitextaroo.com/agents/grok-bot" in out
+
     def test_never_prints_a_real_key(self, capsys, monkeypatch) -> None:
         monkeypatch.setenv("AITEXTAROO_API_KEY", "secret_key_value")
         agent_cli.main(["connect"])

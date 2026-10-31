@@ -1,6 +1,6 @@
 {
   "name": "aitextaroo",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Give your AI agent a phone number: text your user, wait for their reply, and text their contacts (SMS) via AI Text-a-roo.",
   "mcpServers": {
     "aitextaroo": {

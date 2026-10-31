@@ -14,5 +14,5 @@ Example:
 from aitextaroo.client import TextarooClient, TextarooError
 from aitextaroo.models import InboundMessage, StreamEvent
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"
 __all__ = ["TextarooClient", "TextarooError", "InboundMessage", "StreamEvent"]
