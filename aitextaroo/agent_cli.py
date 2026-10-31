@@ -109,11 +109,15 @@ CONNECT: dict[str, str] = {
     "grok": (
         "Grok Bot — say in chat:\n"
         f"  Add a custom MCP server called AI Text-a-roo at {MCP_URL}\n"
-        "To text it back anytime, ask Grok Bot to create a webhook routine and\n"
-        "register it with the set_webhook tool, or register it yourself:\n"
-        '  aitextaroo webhook set <routine URL> --auth-header "Bearer <routine key>" [--pin]\n'
+        "To text it back anytime, ask Grok Bot to create a routine with a webhook\n"
+        "trigger. Grok Bot shows the routine's address and key only on a computer:\n"
+        "open the routine's Webhook section, copy POST to and header into your chat\n"
+        "with Grok Bot, and ask it to register them with set_webhook. Or register\n"
+        "them yourself:\n"
+        '  aitextaroo webhook set <POST to address> --auth-header "Bearer <routine key>" [--pin]\n'
         "(--pin asks for your PIN, needed if you set one. You'll get a text saying\n"
-        "where your texts now go; reply UNHOOK anytime to stop forwarding.)"
+        "where your texts now go; reply UNHOOK anytime to stop forwarding.)\n"
+        "Grok CLI on this computer? Use the bridge instead: aitextaroo-bridge --agent grok"
     ),
 }
 
