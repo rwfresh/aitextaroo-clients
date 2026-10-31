@@ -116,7 +116,13 @@ nohup aitextaroo-bridge > ~/aitextaroo.log 2>&1 &
 The user's texts reach an agent only while it's waiting for a reply, or through a
 webhook or the bridge (a pending wait still gets a text first). Agents that run only
 on demand, like a Grok Bot routine, need a webhook so the user can text them anytime.
-With the MCP server, call `set_webhook`. With a shell:
+With the MCP server, call `set_webhook`.
+
+Grok Bot shows a routine's webhook address and key only on a computer, in the
+routine's Webhook section. Ask the user to copy **POST to** (the URL) and **header**
+(the `auth_header`; the whole `Authorization: Bearer <key>` line works) into the chat.
+
+With a shell:
 
 ```bash
 aitextaroo webhook set https://example.com/hook --auth-header "Bearer <receiver token>"
