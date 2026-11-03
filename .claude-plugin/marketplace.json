@@ -9,7 +9,7 @@
     {
       "name": "aitextaroo",
       "source": "./",
-      "description": "Give your AI agent a phone number: text your user, wait for their reply, and text their contacts (SMS) via AI Text-a-roo."
+      "description": "Give your AI agent a phone number: text your user and wait for their reply (SMS) via AI Text-a-roo."
     }
   ]
 }

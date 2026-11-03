@@ -98,7 +98,6 @@ class TestCommands:
     def _client(self) -> AsyncMock:
         client = AsyncMock()
         client.send.return_value = "msg_1"
-        client.text_contact.return_value = "msg_2"
         client.close.return_value = None
         return client
 
@@ -129,15 +128,22 @@ class TestCommands:
         assert out == {"reply": None, "timed_out": True}
         assert client.wait_for_reply.await_count == 2
 
-    def test_relay(self, capsys) -> None:
-        client = self._client()
-        with patch.object(agent_cli, "TextarooClient", return_value=client):
-            out = _run_cli(
-                ["--api-key", "k", "relay", "--to", "+12125550100", "--name", "Mom", "Hi Mom"],
-                capsys,
-            )
-        assert out == {"message_id": "msg_2"}
-        client.text_contact.assert_awaited_once_with("+12125550100", "Hi Mom", "Mom")
+    @pytest.mark.parametrize(
+        "command",
+        [
+            ["relay", "--to", "+16135550100", "Hi"],
+            ["send", "--to", "+16135550100", "Hi"],
+            ["ask", "--to", "+16135550100", "Hi"],
+        ],
+    )
+    def test_there_is_no_way_to_name_a_recipient(self, capsys, command) -> None:
+        with (
+            patch.object(agent_cli, "TextarooClient") as client_class,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            agent_cli.main(["--api-key", "k", *command])
+        assert exc_info.value.code == 2  # argparse's usage error
+        client_class.assert_not_called()
 
     def test_webhook_set(self, capsys) -> None:
         client = self._client()

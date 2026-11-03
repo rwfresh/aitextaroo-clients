@@ -5,7 +5,6 @@ Usage:
     aitextaroo ask "Deploy to production? Reply YES or NO" --timeout 120
     aitextaroo wait --timeout 60
     aitextaroo recent [--after-id ID]
-    aitextaroo relay --to +16135550100 --name Mom "Happy birthday!"
     aitextaroo verify-pin <<< 4821
     aitextaroo set-pin <<< 4821
     aitextaroo set-pin --current           # change it: current PIN, then the new one
@@ -184,8 +183,6 @@ async def _run(args: argparse.Namespace, key: str) -> Any:
             return {"reply": asdict(reply) if reply else None, "timed_out": reply is None}
         if args.command == "recent":
             return {"messages": [asdict(m) for m in await client.recent_messages(args.after_id)]}
-        if args.command == "relay":
-            return {"message_id": await client.text_contact(args.to, args.text, args.name)}
         if args.command == "verify-pin":
             return await client.verify_pin(args.pin)
         if args.command == "set-pin":
@@ -248,11 +245,6 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
     p = sub.add_parser("recent", help="Texts from the last five minutes")
     p.add_argument("--after-id", default=None, help="Only texts after this message id")
-
-    p = sub.add_parser("relay", help="Text a contact on the user's behalf (Pro)")
-    p.add_argument("--to", required=True, help="Contact's number, E.164 (e.g. +16135550100)")
-    p.add_argument("--name", default=None, help="Contact's name, used to label their replies")
-    p.add_argument("text")
 
     p = sub.add_parser("verify-pin", help="Check a PIN the user texted")
     p.add_argument("pin", nargs="?", help="The PIN (default: read from stdin)")

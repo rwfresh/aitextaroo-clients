@@ -1,15 +1,15 @@
 ---
 name: aitextaroo
-description: Text the user by SMS and read their replies through AI Text-a-roo (aitextaroo.com), which gives an AI agent its own phone number. Use when the user wants to text you from their phone; get reminders, alerts, daily briefs or task-done notifications by text; approve actions by text with a PIN; have you text a friend or family member for them; or set up, troubleshoot or manage AI Text-a-roo, including which apps are connected to it.
+description: Text the user by SMS and read their replies through AI Text-a-roo (aitextaroo.com), which gives an AI agent its own phone number. Use when the user wants to text you from their phone; get reminders, alerts, daily briefs or task-done notifications by text; approve actions by text with a PIN; or set up, troubleshoot or manage AI Text-a-roo, including which apps are connected to it.
 license: MIT
 metadata:
   homepage: https://aitextaroo.com
-  version: "1.2.0"
+  version: "1.3.0"
 ---
 
 # AI Text-a-roo
 
-AI Text-a-roo is an SMS gateway for AI agents. The user verifies their phone number once; after that you can text them, they can text you back from any phone (no app), and on the Pro plan you can text other people on their behalf. Message content is never stored by AI Text-a-roo.
+AI Text-a-roo is an SMS gateway for AI agents. The user verifies their phone number once; after that you can text them, and they can text you back from any phone (no app). It only carries texts between you and the user. Message content is never stored by AI Text-a-roo.
 
 ## Connect
 
@@ -30,7 +30,6 @@ If the user isn't set up yet, follow [references/setup.md](references/setup.md).
 | Ask and wait for the answer | `send_text` + `wait_for_reply` | `ask "…" --timeout 90` (aitextaroo only) |
 | Wait for the user's reply | `wait_for_reply` | `wait --timeout 90` |
 | Read texts from the last 5 minutes | `get_recent_messages` | `recent` |
-| Text a contact for the user (Pro) | `text_contact` | `relay --to +1… --name Mom "…"` |
 | Check a PIN the user texted | `verify_pin` | `verify-pin <<< 4821` |
 | Set or change the user's PIN | `set_pin` | `set-pin <<< 4821`; to change it, `set-pin --current` (current PIN, then the new one) |
 | Plan, usage, number and forwarding | `get_account` | `account` |
@@ -81,21 +80,16 @@ Each new key (from `aitextaroo-setup`, `scripts/textaroo.py confirm`, or "Create
 - **Disconnect one** only when the user asks ("disconnect my old laptop"). Confirm which one first, by its label and when it was last used, then call `remove_connection` with its id, plus the PIN if `has_pin` is true (`disconnect <id> --pin` reads it from stdin or a hidden prompt). It stops working right away, forwarding it set up stops too, and the user is texted. Removing your own connection (`current: true`) cuts you off.
 - **Sign out everything** removes every key and app sign-in (you included), stops forwarding, and signs the user out of the website on their other browsers. It's only on the website dashboard (aitextaroo.com/dashboard), where the user can also see and remove connected apps, stop forwarding, and set or remove their PIN.
 
-## Texting other people (Pro)
-
-Only text a contact when the user explicitly asks, and say who the message is from. Use E.164 numbers (+14165550123) and pass `recipient_name` so replies are labeled. Their replies are forwarded to the user's phone for an hour after you (or the user, with `>`) last texted them; their own texts don't extend that hour. Each forwarded reply ends "Reply with > to answer": the user answers a contact directly by starting a text with `>`. Your text, their replies and the user's `>` answers all count toward the daily limit. Relays are one-to-one: never use them for bulk or marketing messages.
-
 ## Questions about how it works
 
 If the user asks how AI Text-a-roo works, what it stores, or how it's secured, call `get_help` (topics: overview, text_anytime, receiving, webhooks, security, privacy, limits, setup) and answer from it instead of guessing. Without MCP, the same answers are at https://aitextaroo.com/security and https://aitextaroo.com/llms.txt.
 
 ## Limits
 
-- Free: 10 messages a day. Pro ($5/month, 14-day free trial): 200 a day.
-- What counts: texts you send (to the user or to contacts), contacts' replies forwarded to the user, and the user's `>` replies to contacts. The user's own texts to you don't count.
-- Contacts' replies are forwarded for an hour after you (or the user, with `>`) last texted that contact, at most 20 an hour and 50 a day per contact. Once 80% of the day's limit is used they aren't forwarded at all (the user gets one text saying so), so contacts can't use up the texts the user needs with you.
+- Free: 10 texts a day. Pro (US$5/month, 14-day free trial): 200 a day. The daily limit is the only difference.
+- What counts: texts you send. The user's own texts to you don't count.
 - Up to 5 texts per minute. Limits reset at midnight UTC.
-- When the daily limit is hit, the user gets one heads-up text, and texts pause both ways until it resets: sends fail with `daily_limit_reached`, texts the user sends are dropped, contacts' replies aren't forwarded, and the user's `>` replies aren't sent.
+- When the daily limit is hit, the user gets one heads-up text, and texts pause both ways until it resets: sends fail with `daily_limit_reached` and texts the user sends are dropped.
 
 ## Troubleshooting
 
@@ -103,9 +97,8 @@ If the user asks how AI Text-a-roo works, what it stores, or how it's secured, c
 - The bridge stopped, saying its key was removed or isn't on the account: if a new key was saved since, just start it again; otherwise add one with `aitextaroo-setup --save`, then start it. If it says another one took over (`evicted`): another copy of the bridge, or another program reading the account's live stream, started somewhere with one of the account's keys. Only one can listen at a time, so stop that one, then start this one again. Connected apps such as Grok or Claude, and forwarding, never cause this.
 - `daily_limit_reached`: wait until midnight UTC, or offer the upgrade link.
 - `rate_limit_exceeded`: more than 5 texts in a minute, or too many PIN, forwarding or connection changes in an hour or a day; wait and try again later.
-- Relay rejected: texting contacts needs Pro. Offer `get_upgrade_link`.
-- `recipient_not_allowed`: that number has its own AI Text-a-roo account on the same number, so it can't be texted as a contact.
-- `unsupported_region`: AI Text-a-roo can't text numbers in that country yet, so nothing was sent. US numbers are coming soon (US carriers require a registration we haven't finished).
+- `owner_only`: AI Text-a-roo only carries texts between an agent and its owner. If the user asks you to text someone else, tell them you can't do that through AI Text-a-roo.
+- `unsupported_region`: AI Text-a-roo can't text numbers in that country yet, so nothing was sent. US numbers are coming soon (US carriers require a registration we haven't done yet).
 - `pin_required` / `current_pin_required`: ask the user for their PIN (or current PIN) and try again with it. `pin_locked`: too many wrong tries; wait a few minutes (or a day after 10). If the user forgot their PIN, they can remove it on the dashboard (that always works), then set a new one.
 - `pin_conflict`: the PIN changed while you were working (maybe the user changed it); check `get_account` and try again.
 - `owner_notice_failed`: AI Text-a-roo couldn't text the user about a security change, so nothing changed; try again in a minute. `temporarily_unavailable`: security checks are down for a moment, so nothing changed; try again in a minute.

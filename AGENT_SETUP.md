@@ -2,7 +2,8 @@
 
 AI Text-a-roo is an SMS gateway for AI agents. It gives an agent its own phone
 number: the user texts it from any phone (no app), and the agent can text the
-user back, or first. Message content is never stored.
+user back, or first. It only carries texts between the agent and the user. Message
+content is never stored.
 
 Setup needs two things from the user: their Canadian mobile number (US numbers
 are coming soon), and the 6-digit code that AI Text-a-roo texts to it. The agent
@@ -73,7 +74,6 @@ Everyday commands (JSON output):
 aitextaroo send "Build finished: 318 tests passing."
 aitextaroo ask "Deploy to production? Reply YES or NO" --timeout 120   # text, then wait for the answer
 aitextaroo recent                                                       # texts from the last 5 minutes
-aitextaroo relay --to +16135550100 --name Mom "Happy birthday!"        # Pro
 aitextaroo verify-pin             # asks for the PIN without echoing; exits 2 if wrong
 aitextaroo account
 aitextaroo connections            # keys and app sign-ins on the account; "current" is you
@@ -182,14 +182,8 @@ texts yet. Use plain words with the user and finish with a live test text.
 
 ## Plans and limits
 
-- Free: 10 messages a day. Pro: $5/month (14-day free trial), 200 a day, plus
-  texting the user's contacts with replies forwarded to the user.
-- What counts: texts you send (to the user or their contacts), contacts' replies
-  forwarded to the user, and the user's `>` replies to them. The user's own texts
-  to you don't count, but once the limit is reached texts pause both ways until
-  it resets.
-- A contact's replies are forwarded for an hour after you (or the user, with `>`)
-  last texted that contact, at most 20 an hour and 50 a day, and they stop being
-  forwarded once 80% of the day's limit is used (the user gets one text saying
-  so), so contacts can't use up the texts the user needs with you.
+- Free: 10 texts a day. Pro: US$5/month (14-day free trial), 200 a day. The daily
+  limit is the only difference.
+- What counts: texts you send. The user's own texts to you don't count, but once
+  the limit is reached texts pause both ways until it resets.
 - Up to 5 texts per minute. Limits reset at midnight UTC.

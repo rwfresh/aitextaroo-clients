@@ -109,7 +109,7 @@ class TestParseJsonResponse:
     @pytest.mark.parametrize(
         ("loc", "message"),
         [
-            ('["body", "contacts", 0, "to"]', "contacts.0.to: Bad number"),
+            ('["body", "items", 0, "phone"]', "items.0.phone: Bad number"),
             ('["query", "after_id"]', "after_id: Bad number"),
             ('["body"]', "Bad number"),
             ("null", "Bad number"),
@@ -536,6 +536,33 @@ class TestParseEvent:
     def test_parse_unknown_type(self) -> None:
         event = _parse_event("unknown_type", None, ['{"foo": "bar"}'])
         assert event is None
+
+    @pytest.mark.parametrize(
+        "data",
+        [
+            '{"type": "relay_reply", "from_name": "Lisa", "delivered": true}',
+            '{"type": "relay_failed", "reason": "carrier_error"}',
+            '{"id": "m1", "type": "some_future_event", "text": "looks like a text"}',
+            '{"id": "m1", "received_at": "now"}',  # no text
+            '{"id": "m1", "text": 5}',
+            '["not", "an", "object"]',
+            '"text"',
+            "null",
+        ],
+    )
+    def test_parse_message_that_is_not_an_owner_text(self, data: str) -> None:
+        assert _parse_event("message", "m1", [data]) is None
+
+    @pytest.mark.parametrize("event_type", ["connected", "error", "unknown_type", None])
+    def test_parse_data_that_is_not_an_object(self, event_type: str | None) -> None:
+        assert _parse_event(event_type, None, ['["not", "an", "object"]']) is None
+
+    def test_parse_message_with_empty_text_is_still_the_owners(self) -> None:
+        # The API sends the owner's empty texts too, so this is unchanged.
+        event = _parse_event("message", "m1", ['{"id": "m1", "text": "", "received_at": "now"}'])
+        assert event is not None
+        assert event.message is not None
+        assert event.message.text == ""
 
     def test_parse_empty_data(self) -> None:
         event = _parse_event("message", None, [])
