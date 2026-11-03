@@ -89,6 +89,64 @@ def sleep():
         yield mock
 
 
+# Everything the API's stream sends goes out as an SSE "message" event, so these
+# have the event name of a text: an older API's notices, and what a later one may add.
+NOT_OWNER_TEXTS = [
+    ("message", None, {"type": "relay_reply", "from_name": "Lisa", "delivered": True}),
+    ("message", None, {"type": "relay_failed", "reason": "carrier_error", "to_name": "Lisa"}),
+    ("message", "n1", {"id": "n1", "type": "some_future_event", "text": "looks like a text"}),
+    ("message", "n2", {"id": "n2", "received_at": "now"}),
+    ("message", None, ["not", "an", "object"]),
+    ("relay_reply", None, {"from_name": "Lisa", "delivered": True}),
+    ("some_future_event", "n3", {"id": "n3", "text": "looks like a text"}),
+]
+
+
+class TestOnlyOwnerTextsGetThrough:
+    @pytest.mark.asyncio
+    async def test_other_events_never_arrive_as_texts(self, sleep) -> None:
+        client, seen = _streaming_client(
+            _sse(
+                CONNECTED,
+                _message("m1", "before"),
+                *NOT_OWNER_TEXTS,
+                _message("m2", "after"),
+                _error("evicted"),
+            )
+        )
+        texts, error = await _collect(client)
+        assert texts == ["before", "after"]  # and the stream carries on past them
+        assert error is not None and error.code == "evicted"
+        assert len(seen) == 1
+        assert client._last_event_id == "m2"
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_an_event_with_no_name_is_not_a_text(self, sleep) -> None:
+        # The SSE default is "message", but the API always names its events.
+        body = b'data: {"id": "n1", "text": "looks like a text"}\n\n' + _sse_body(
+            _message("m1", "real"), _error("evicted")
+        )
+        client, _ = _streaming_client(httpx.Response(200, content=body, headers=SSE_HEADERS))
+        texts, error = await _collect(client)
+        assert texts == ["real"]
+        assert error is not None and error.code == "evicted"
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_an_ignored_event_leaves_the_replay_cursor_on_the_last_text(self, sleep) -> None:
+        client, seen = _streaming_client(
+            _sse(
+                CONNECTED, _message("m1", "first"), NOT_OWNER_TEXTS[2], _error("reconnect_required")
+            ),
+            _sse(CONNECTED, _message("m2", "second"), _error("evicted")),
+        )
+        texts, _ = await _collect(client)
+        assert texts == ["first", "second"]
+        assert seen[1].headers["Last-Event-ID"] == "m1"
+        await client.close()
+
+
 class TestStreamStopsForGood:
     @pytest.mark.asyncio
     async def test_removed_key_stops_without_reconnecting(self, sleep) -> None:

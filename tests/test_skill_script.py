@@ -85,6 +85,22 @@ class TestConfirm:
             run("confirm", "--phone", "+12125551234", "--code", "123456", "--label", label)
 
 
+class TestSend:
+    def test_sends_only_the_text(self, run) -> None:
+        calls = run("send", "Build finished.")
+        assert calls[0][:2] == ("POST", "/send")
+        assert calls[0][2]["body"] == {"text": "Build finished."}
+
+    @pytest.mark.parametrize(
+        "command",
+        [("relay", "--to", "+16135550100", "Hi"), ("send", "--to", "+16135550100", "Hi")],
+    )
+    def test_there_is_no_way_to_name_a_recipient(self, run, command) -> None:
+        with pytest.raises(SystemExit) as exc_info:
+            run(*command)
+        assert exc_info.value.code == 2  # argparse's usage error
+
+
 class TestConnections:
     def test_list(self, run) -> None:
         calls = run("connections")
@@ -145,6 +161,8 @@ class TestErrors:
             (401, b'{"detail": {"error": {"code": "unauthorized", "message": "Invalid API key."}}}',
              "HTTP 401: unauthorized: Invalid API key."),
             (400, b'{"detail": "Already on Pro"}', "HTTP 400: Already on Pro"),
+            (400, b'{"error": {"code": "owner_only", "message": "Only the owner."}}',
+             "HTTP 400: owner_only: Only the owner."),
             (502, b"<html>Bad Gateway</html>", "HTTP 502: Bad Gateway"),
             (500, b"", "HTTP 500: Bad Gateway"),
         ],

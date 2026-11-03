@@ -15,13 +15,12 @@ Each confirmation adds a key named `label` (optional, 1–40 letters, digits, sp
 
 | Method | Path | Body / query | Notes |
 |---|---|---|---|
-| POST | `/send` | `{"text": "…"}` | Texts the user. Max 1,600 characters. |
-| POST | `/send` | `{"text": "…", "to": "+1…", "recipient_name": "Mom"}` | Texts a contact (Pro). Their replies are forwarded to the user for an hour after the last text to them (yours, or the user's `>` reply). |
+| POST | `/send` | `{"text": "…"}` | Texts the user. Max 1,600 characters. There's no recipient: any `to` gets `owner_only` and nothing is sent. |
 | POST | `/messages/wait` | `{"timeout_seconds": 60}` (1–120) | Waits for the user's next text. Returns `{"message": {...} \| null, "timed_out": bool}`. |
 | GET | `/messages/recent` | `?after_id=<message id>` (optional) | Texts from the last 5 minutes: `{"messages": [...], "retention_seconds": 300}`. |
 | GET | `/stream` | `Accept: text/event-stream` | Server-Sent Events stream of inbound texts. One stream per account; supports `Last-Event-ID`. |
 
-An inbound message looks like `{"id": "<uuid>", "text": "…", "received_at": "…", "channel": "sms", "trust_level": "low", "has_pin": true}`.
+An inbound message looks like `{"id": "<uuid>", "text": "…", "received_at": "…", "channel": "sms", "trust_level": "low", "has_pin": true}`. On the stream, only a `message` event with no `type` field is a text from the user; ignore any other event.
 
 The stream can end with an `error` event, `{"code": "…", "message": "…"}`: `server_restarting` (a deploy; reconnect after `retry_after` seconds), `reconnect_required` (reconnect), `evicted` (another stream took over the account; don't reconnect automatically, or the two take turns kicking each other off) or `credential_revoked` (the key was removed; reconnecting gets a 401). Reconnect on any other code. A keepalive comment comes at least every 20 seconds, so a stream that's silent for much longer than that is dead: reconnect.
 
@@ -53,11 +52,12 @@ Delivery order: a pending `/messages/wait` (or MCP `wait_for_reply`) gets the ne
 
 Errors return `{"error": {"code": "…", "message": "…"}}` (authentication failures wrap the same object in `detail`). Common codes:
 
+- `owner_only` (400): `/send` was given a recipient. AI Text-a-roo only carries texts between an agent and its owner, so nothing was sent.
+- `unsupported_region` (400): we can't text the user's number yet (US numbers are coming soon). Nothing was sent, and it didn't count.
 - `unauthorized` (401): missing or wrong API key, or one that was removed from the account.
-- `tier_required` (403): texting contacts needs Pro.
 - `pin_required` / `pin_incorrect` (403): this change needs the user's PIN, or the PIN was wrong (wrong PINs count toward the lockout).
 - `connection_not_found` (404): no key or app sign-in with that id on this account.
 - `rate_limit_exceeded` (429): more than 5 texts in a minute, or too many PIN, webhook or connection changes.
-- `daily_limit_reached` (429): resets at midnight UTC; until then texts pause both ways. Texts you send, contacts' replies forwarded to the user and the user's `>` replies count; the user's own texts to you don't. Contacts' replies are forwarded at most 20 an hour and 50 a day per contact, and not at all once 80% of the day's limit is used.
+- `daily_limit_reached` (429): resets at midnight UTC; until then texts pause both ways. Texts you send count; the user's own texts to you don't.
 - `pin_locked` (429): too many wrong PIN attempts; try again in a few minutes.
 - `temporarily_unavailable` (503): security checks are unavailable right now, so nothing changed; try again in a minute.

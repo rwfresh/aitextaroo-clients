@@ -8,7 +8,6 @@ Text your user and read their replies through https://aitextaroo.com.
     textaroo.py send "Build finished. Open a PR?"
     textaroo.py wait --timeout 90
     textaroo.py recent [--after-id ID]
-    textaroo.py relay --to +16135550100 --name Mom "Happy birthday!"
     textaroo.py verify-pin <<< 4821
     textaroo.py set-pin <<< 4821
     printf '1111\n4821\n' | textaroo.py set-pin --current   # change it: current, then new
@@ -162,11 +161,6 @@ def main() -> None:
     p = sub.add_parser("send", help="Text the user")
     p.add_argument("text")
 
-    p = sub.add_parser("relay", help="Text a contact on the user's behalf (Pro)")
-    p.add_argument("--to", required=True, help="Contact's number, E.164")
-    p.add_argument("--name", help="Contact's name, used to label their replies")
-    p.add_argument("text")
-
     p = sub.add_parser("wait", help="Wait for the user's next text")
     p.add_argument("--timeout", type=int, default=60, help="Seconds to wait (1-120)")
 
@@ -228,11 +222,6 @@ def main() -> None:
             pin = read_pin(args.pin, "New PIN: " if args.command == "set-pin" else "PIN: ")
         if args.command == "send":
             result = request("POST", "/send", base_url=base, api_key=key, body={"text": args.text})
-        elif args.command == "relay":
-            body = {"text": args.text, "to": args.to}
-            if args.name:
-                body["recipient_name"] = args.name
-            result = request("POST", "/send", base_url=base, api_key=key, body=body)
         elif args.command == "wait":
             timeout = max(1, min(120, args.timeout))
             result = request(

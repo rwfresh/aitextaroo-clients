@@ -152,7 +152,7 @@ Forwarding is protected:
 
 - Registering needs the user's PIN if they have one, and changing or removing the PIN needs the current PIN (only the user can skip that, by removing it on the dashboard), so an agent can't remove it first to get around this. Wrong PINs count toward the usual lockouts (3 per 5 minutes, 10 a day).
 - Before forwarding starts, AI Text-a-roo texts the user where their texts will go: the host only (never the full URL), and which host it replaces. If that text can't be sent, nothing changes.
-- The user can text `UNHOOK` to their AI Text-a-roo number anytime to stop forwarding. AI Text-a-roo handles it first, so it never reaches an agent or a contact.
+- The user can text `UNHOOK` to their AI Text-a-roo number anytime to stop forwarding. AI Text-a-roo handles it first, so it never reaches an agent.
 - The user can also see where their texts go, and stop it, on the dashboard (aitextaroo.com/dashboard). Removing the key or app sign-in that set up forwarding (on the dashboard or with `remove_connection`) stops it too.
 - Only public HTTPS URLs with plain-ASCII host names are accepted, and at most 5 webhook changes an hour and 10 a day.
 

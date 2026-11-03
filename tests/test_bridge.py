@@ -633,6 +633,73 @@ class TestBridgeSendFailures:
         assert _sent(client) == [REPLY]
 
 
+class TestOnlyTheOwnerReachesTheAgent:
+    """Through a real TextarooClient: what the stream sends, and what the agent is given."""
+
+    @staticmethod
+    def _sse(name: str, data: dict) -> str:
+        return f"event: {name}\ndata: {json.dumps(data)}\n\n"
+
+    @pytest.mark.asyncio
+    async def test_other_stream_events_never_reach_the_agent(self) -> None:
+        body = "".join(
+            self._sse(name, data)
+            for name, data in [
+                ("connected", {"user_id": "u", "assigned_number": "+1", "server_time": "now"}),
+                # How an older API sends a contact's notice: no text, "message" as the name.
+                ("message", {"type": "relay_reply", "from_name": "Lisa", "delivered": True}),
+                ("message", {"type": "relay_failed", "reason": "carrier_error"}),
+                ("message", {"type": "some_future_event", "text": "looks like a text"}),
+                ("some_future_event", {"text": "looks like a text"}),
+                ("message", {"id": "m1", "text": "When's dinner?", "received_at": "now"}),
+                ("error", {"code": "evicted", "message": "Another one started."}),
+            ]
+        )
+        sends: list[dict] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/v1/stream":
+                return httpx.Response(
+                    200, text=body, headers={"content-type": "text/event-stream"}
+                )
+            sends.append(json.loads(request.content))
+            return httpx.Response(200, json=SENT)
+
+        client = TextarooClient(api_key="test_key")
+        client._client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler), base_url="https://test.com"
+        )
+        agent = FakeAgent(response=REPLY)
+        agent.ask = AsyncMock(return_value=REPLY)
+
+        with pytest.raises(TextarooError, match="evicted"):
+            await Bridge(client=client, agent=agent).run()
+
+        agent.ask.assert_awaited_once()
+        assert "User: When's dinner?" in agent.ask.await_args.args[0]
+        assert sends == [{"text": REPLY}]  # no reply spent on anything else
+
+    @pytest.mark.asyncio
+    async def test_a_text_starting_with_the_old_prefix_is_an_ordinary_text(self) -> None:
+        client = AsyncMock(spec=TextarooClient)
+        agent = FakeAgent(response=REPLY)
+
+        await Bridge(client=client, agent=agent)._handle(_make_message("> dinner at 7?"))
+
+        assert agent.last_input is not None
+        assert "User: > dinner at 7?" in agent.last_input
+        assert client.send.await_args.args[0] == REPLY
+
+    @pytest.mark.asyncio
+    async def test_an_owner_only_refusal_gets_the_notice_and_no_retry(self, sleeps) -> None:
+        bridge, client = _bridge(_api_error(400, "owner_only"), "msg-2")
+
+        await bridge._handle(_make_message("When's dinner?"))
+
+        assert _sent(client) == [REPLY, REFUSED_NOTICE]
+        assert sleeps == []
+
+
 class TestBridgeSendFailuresOverHttp:
     """The same, through a real TextarooClient and the API's real error bodies."""
 

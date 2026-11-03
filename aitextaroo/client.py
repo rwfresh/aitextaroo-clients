@@ -4,9 +4,8 @@ Provides:
 1. listen()          — SSE stream for real-time inbound SMS delivery
 2. send()            — POST outbound SMS to the user's phone
 3. wait_for_reply()  — ask a question, then wait for the user's answer
-4. text_contact()    — text someone else on the user's behalf (Pro)
-5. PIN checks, recent messages, webhooks and the Pro upgrade link
-6. Connections: list the account's keys and app sign-ins, remove one
+4. PIN checks, recent messages, webhooks and the Pro upgrade link
+5. Connections: list the account's keys and app sign-ins, remove one
 
 The SSE client handles reconnection, Last-Event-ID replay,
 and keepalive parsing automatically. No public IP or webhook
@@ -331,6 +330,9 @@ class TextarooClient:
     async def send(self, text: str, *, idempotency_key: str | None = None) -> str | None:
         """Send an SMS to the registered user.
 
+        AI Text-a-roo only carries texts between an agent and its owner, so
+        there's no recipient to choose.
+
         Args:
             text: Message body (max 1600 characters).
             idempotency_key: Your own random ID for this text (1-64 letters,
@@ -348,47 +350,11 @@ class TextarooClient:
         Raises:
             TextarooError: If the API returns an error.
         """
-        return await self._post_send({"text": text}, idempotency_key)
-
-    async def text_contact(
-        self,
-        to: str,
-        text: str,
-        recipient_name: str | None = None,
-        *,
-        idempotency_key: str | None = None,
-    ) -> str | None:
-        """Text someone else on the user's behalf (Pro plan).
-
-        The contact sees the AI's number. Their replies are forwarded to
-        the user's phone, labeled with recipient_name when given, for an
-        hour after the last text to them (from you, or the user's ">" reply).
-        They count toward the daily limit, and stop once 80% of it is used.
-
-        Args:
-            to: The contact's number in E.164 format (e.g., "+16135550100").
-            text: Message body (max 1600 characters).
-            recipient_name: Optional name used to label forwarded replies.
-            idempotency_key: As for send(): the text goes out at most once.
-
-        Returns:
-            The carrier message ID, or None when an earlier request with
-            the same idempotency_key already sent it.
-
-        Raises:
-            TextarooError: If the API returns an error ("tier_required" on Free).
-        """
-        body: dict[str, Any] = {"text": text, "to": to}
-        if recipient_name:
-            body["recipient_name"] = recipient_name
-        return await self._post_send(body, idempotency_key)
-
-    async def _post_send(self, body: dict[str, Any], idempotency_key: str | None) -> str | None:
         if idempotency_key is not None and not _IDEMPOTENCY_KEY.fullmatch(idempotency_key):
             raise ValueError("idempotency_key must be 1 to 64 letters, digits, '-' or '_'")
         client = await self._get_client()
         headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
-        response = await client.post("/v1/send", json=body, headers=headers)
+        response = await client.post("/v1/send", json={"text": text}, headers=headers)
         data = _parse_json_response(response, "Send failed")
         if idempotency_key:
             self.idempotency_supported = "duplicate" in data
@@ -430,7 +396,7 @@ class TextarooClient:
         )
         data = _parse_json_response(response, "Wait for reply failed")
         message = data.get("message")
-        return _message_from_dict(message) if isinstance(message, dict) else None
+        return _message_from_dict(message) if _is_owner_text(message) else None
 
     async def recent_messages(self, after_id: str | None = None) -> list[InboundMessage]:
         """Texts the user sent in the last five minutes, oldest first.
@@ -451,7 +417,7 @@ class TextarooClient:
         messages = data.get("messages")
         if not isinstance(messages, list):
             return []
-        return [_message_from_dict(m) for m in messages if isinstance(m, dict)]
+        return [_message_from_dict(m) for m in messages if _is_owner_text(m)]
 
     # ── Security PIN ────────────────────────────────────────────
 
@@ -650,6 +616,7 @@ class TextarooClient:
         Yields InboundMessage objects as they arrive. Handles
         reconnection and Last-Event-ID replay automatically, including
         after a stream that goes silent for STREAM_READ_TIMEOUT seconds.
+        Only the owner's texts are yielded: any other event is ignored.
 
         An account has one stream at a time: opening another one (from any
         of its keys) ends this one with "evicted".
@@ -799,6 +766,10 @@ def _parse_event(
         logger.warning("Failed to parse SSE data: %s", raw_data[:100])
         return None
 
+    if not isinstance(data, dict):
+        logger.debug("Ignoring a %s event whose data isn't an object", event_type)
+        return None
+
     if event_type == "connected":
         return StreamEvent(
             type=EventType.CONNECTED,
@@ -810,6 +781,9 @@ def _parse_event(
         )
 
     if event_type == "message":
+        if not _is_owner_text(data):
+            logger.debug("Ignoring a message event that isn't an owner text: %s", data.get("type"))
+            return None
         return StreamEvent(type=EventType.MESSAGE, message=_message_from_dict(data))
 
     if event_type == "error":
@@ -824,6 +798,17 @@ def _parse_event(
 
     logger.debug("Unknown event type: %s", event_type)
     return None
+
+
+def _is_owner_text(data: object) -> bool:
+    """Whether API message JSON is a text from the owner, the only thing an agent may be given.
+
+    The API's stream sends everything as an SSE "message" event, so the event
+    name doesn't settle it: anything but an owner text carries a "type" key.
+    An older API's relay_reply and relay_failed notices looked like that, with
+    no text, and would otherwise reach the agent as a blank text from its owner.
+    """
+    return isinstance(data, dict) and "type" not in data and isinstance(data.get("text"), str)
 
 
 def _message_from_dict(data: dict) -> InboundMessage:

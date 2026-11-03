@@ -1,4 +1,4 @@
-"""Tests for the reply, relay, PIN, webhook, connection and billing client methods."""
+"""Tests for the reply, PIN, webhook, connection and billing client methods."""
 
 import json
 
@@ -43,7 +43,7 @@ class TestSendingOnce:
     async def test_the_key_is_sent_as_a_header(self) -> None:
         client, seen = _recording_client(200, '{"status": "sent", "message_id": "msg_1"}')
         assert await client.send("Dinner at 7", idempotency_key="text-1") == "msg_1"
-        assert await client.text_contact("+12125550100", "Hi", idempotency_key="text-2") == "msg_1"
+        assert await client.send("Lunch at 12", idempotency_key="text-2") == "msg_1"
         assert [r.headers.get("Idempotency-Key") for r in seen] == ["text-1", "text-2"]
         await client.close()
 
@@ -102,34 +102,38 @@ class TestSendingOnce:
         await client.close()
 
 
-class TestTextContact:
+class TestOnlyTheOwner:
+    """AI Text-a-roo only carries texts between an agent and its owner."""
+
     @pytest.mark.asyncio
-    async def test_sends_to_and_name(self) -> None:
-        client, seen = _recording_client(200, '{"message_id": "msg_1"}')
-        assert await client.text_contact("+12125550100", "Happy birthday!", "Mom") == "msg_1"
-        assert seen[0].url.path == "/v1/send"
-        assert json.loads(seen[0].content) == {
-            "text": "Happy birthday!",
-            "to": "+12125550100",
-            "recipient_name": "Mom",
-        }
+    async def test_send_never_names_a_recipient(self) -> None:
+        client, seen = _recording_client(200, '{"status": "sent", "message_id": "msg_1"}')
+        await client.send("Dinner at 7")
+        await client.send("Dinner at 7", idempotency_key="text-1")
+        assert [r.url.path for r in seen] == ["/v1/send", "/v1/send"]
+        assert [json.loads(r.content) for r in seen] == [{"text": "Dinner at 7"}] * 2
         await client.close()
 
     @pytest.mark.asyncio
-    async def test_omits_empty_name(self) -> None:
-        client, seen = _recording_client(200, '{"message_id": "msg_1"}')
-        await client.text_contact("+12125550100", "Hi")
-        assert "recipient_name" not in json.loads(seen[0].content)
+    async def test_send_takes_no_recipient(self) -> None:
+        client, seen = _recording_client(200, '{"status": "sent", "message_id": "msg_1"}')
+        with pytest.raises(TypeError):
+            await client.send("Hi", to="+16135550100")  # type: ignore[call-arg]
+        assert seen == []
+        assert not hasattr(client, "text_contact")
         await client.close()
 
     @pytest.mark.asyncio
-    async def test_free_tier_rejected(self) -> None:
+    async def test_an_owner_only_refusal_is_an_ordinary_api_error(self) -> None:
         client, _ = _recording_client(
-            403, '{"error": {"code": "tier_required", "message": "Relay needs Pro"}}'
+            400,
+            '{"error": {"code": "owner_only", "message": "Only the owner can be texted."}}',
         )
         with pytest.raises(TextarooError) as exc_info:
-            await client.text_contact("+12125550100", "Hi")
-        assert exc_info.value.code == "tier_required"
+            await client.send("Hi")
+        assert exc_info.value.code == "owner_only"
+        assert exc_info.value.status_code == 400
+        assert exc_info.value.message == "Only the owner can be texted."
         await client.close()
 
 
@@ -142,6 +146,13 @@ class TestWaitForReply:
         assert reply.text == "Yes, open the PR"
         assert reply.has_pin is True
         assert json.loads(seen[0].content) == {"timeout_seconds": 30}
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_anything_but_an_owner_text_is_no_reply(self) -> None:
+        notice = {"type": "relay_reply", "from_name": "Lisa", "delivered": True}
+        client, _ = _recording_client(200, json.dumps({"message": notice, "timed_out": False}))
+        assert await client.wait_for_reply() is None
         await client.close()
 
     @pytest.mark.asyncio
@@ -171,6 +182,13 @@ class TestRecentMessages:
         messages = await client.recent_messages(after_id="m0")
         assert [m.id for m in messages] == ["m1"]
         assert seen[0].url.params["after_id"] == "m0"
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_leaves_out_anything_but_owner_texts(self) -> None:
+        notice = {"type": "relay_failed", "reason": "carrier_error"}
+        client, _ = _recording_client(200, json.dumps({"messages": [notice, MESSAGE]}))
+        assert [m.id for m in await client.recent_messages()] == ["m1"]
         await client.close()
 
     @pytest.mark.asyncio

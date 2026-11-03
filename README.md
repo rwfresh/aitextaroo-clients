@@ -61,7 +61,6 @@ aitextaroo send "Build finished: 318 tests passing."
 aitextaroo ask "Deploy to production? Reply YES or NO" --timeout 120   # text, then wait for the answer
 aitextaroo wait --timeout 60                                            # wait for the next text
 aitextaroo recent                                                       # texts from the last 5 minutes
-aitextaroo relay --to +16135550100 --name Mom "Happy birthday!"        # Pro: text a contact
 aitextaroo verify-pin                                                   # check a PIN (hidden prompt)
 aitextaroo set-pin                                                      # set the user's PIN (4-8 digits)
 aitextaroo set-pin --current                                            # change it: current PIN, then the new one
@@ -158,11 +157,10 @@ asyncio.run(main())
 
 | Method | What it does |
 |---|---|
-| `send(text, *, idempotency_key=None)` | Text the user. Returns the message ID. With an `idempotency_key` (your own random ID for the text, the same on every retry and never reused for another text), it's sent at most once: a retry of one that went out returns `None`, and one still sending or cut off raises `send_in_doubt`. |
+| `send(text, *, idempotency_key=None)` | Text the user, the only person it can text. Returns the message ID. With an `idempotency_key` (your own random ID for the text, the same on every retry and never reused for another text), it's sent at most once: a retry of one that went out returns `None`, and one still sending or cut off raises `send_in_doubt`. |
 | `wait_for_reply(timeout_seconds=60)` | Wait up to 120 s for the user's next text (or one that arrived since your last send). Returns an `InboundMessage` or `None`. |
 | `recent_messages(after_id=None)` | Texts from the last five minutes. |
-| `listen()` | Async iterator over inbound texts via SSE, with automatic reconnect and replay. Raises `TextarooError` when reconnecting can't help: `unauthorized`, `credential_revoked` (the key was removed) or `evicted` (another stream took over the account). |
-| `text_contact(to, text, recipient_name=None, *, idempotency_key=None)` | Pro: text someone else; their replies go to the user's phone for an hour after the last text to them. `idempotency_key` as for `send`. |
+| `listen()` | Async iterator over the user's texts via SSE, with automatic reconnect and replay. Any other stream event is ignored. Raises `TextarooError` when reconnecting can't help: `unauthorized`, `credential_revoked` (the key was removed) or `evicted` (another stream took over the account). |
 | `verify_pin(pin)` | Check a PIN the user texted: `{"verified": bool, "attempts_remaining": int \| None}`. |
 | `set_pin(pin, current_pin=None)` / `remove_pin(current_pin)` | Set the security PIN the user chose (4–8 digits), change it (needs `current_pin`), or remove it (needs the current PIN). The user is texted before any change. |
 | `set_webhook(url, auth_header=None, pin=None)` / `remove_webhook()` | Forward inbound texts to a URL (signed with `X-Signature`). `pin` is required if the user has one; the user is texted where their texts go and can reply `UNHOOK` to stop it. |
@@ -178,7 +176,7 @@ asyncio.run(main())
 ## MCP server
 
 `https://api.aitextaroo.com/mcp` (streamable HTTP). Tools: `send_text`, `wait_for_reply`,
-`get_recent_messages`, `text_contact`, `verify_pin`, `set_pin`, `get_account`,
+`get_recent_messages`, `verify_pin`, `set_pin`, `get_account`,
 `get_upgrade_link`, `set_webhook`, `remove_webhook`, `list_connections`, `remove_connection`,
 and `get_help` (how it works and how it's secured, for answering the user's questions).
 Clients sign in with OAuth, or send `Authorization: Bearer <API key>`:
@@ -192,20 +190,18 @@ Run `aitextaroo connect` for every client's exact setup. Reference: <https://ait
 
 ## Plans
 
-| | Free ($0) | Pro ($5/mo, 14-day free trial) |
+| | Free ($0) | Pro (US$5/mo, 14-day free trial) |
 |---|---|---|
-| Messages per day | 10 | 200 |
+| Texts per day | 10 | 200 |
 | Two-way texting, MCP, skill, SDK, bridge | ✓ | ✓ |
 | Security PIN | ✓ | ✓ |
-| Text your contacts, with replies forwarded | | ✓ |
 
-What counts toward the daily limit: texts your agent sends (to you or your contacts), your
-contacts' replies forwarded to you, and your `>` replies to them. Your own texts to your agent
-don't count, but once the limit is reached, texts pause both ways until it resets. A
-contact's replies are forwarded for an hour after your agent (or you, with `>`) last texted
-them, at most 20 an hour and 50 a day, and they stop being forwarded once 80% of the day's
-limit is used (you get one text saying so), so contacts can't use up the texts you need with
-your agent. Up to 5 texts per minute. Limits reset at midnight UTC.
+The daily limit is the only difference between the plans. AI Text-a-roo only carries texts
+between you and your agent, on either plan.
+
+What counts toward the daily limit: texts your agent sends. Your own texts to your agent
+don't count, but once the limit is reached, texts pause both ways until it resets. Up to 5
+texts per minute. Limits reset at midnight UTC.
 
 ## Privacy and security
 
@@ -240,7 +236,7 @@ Details: <https://aitextaroo.com/security>.
 
 Bump the version in `pyproject.toml`, `aitextaroo/__init__.py`, `plugin.json`,
 `.claude-plugin/plugin.json` and `gemini-extension.json`, merge to `main`, then push a
-matching tag: `git tag v0.3.0 && git push origin v0.3.0`. The
+matching tag: `git tag v0.4.0 && git push origin v0.4.0`. The
 [Release workflow](.github/workflows/release.yml) tests, builds and publishes to PyPI with
 Trusted Publishing.
 
