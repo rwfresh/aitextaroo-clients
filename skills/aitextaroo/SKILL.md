@@ -4,7 +4,7 @@ description: Text the user by SMS and read their replies through AI Text-a-roo (
 license: MIT
 metadata:
   homepage: https://aitextaroo.com
-  version: "1.3.0"
+  version: "1.3.1"
 ---
 
 # AI Text-a-roo
@@ -78,7 +78,7 @@ Each new key (from `aitextaroo-setup`, `scripts/textaroo.py confirm`, or "Create
 
 - **What's connected?** Call `list_connections` (or run `connections`). Each key and app sign-in has a label and when it was last used; `current` is you, and `forwarding` marks the one that set up forwarding.
 - **Disconnect one** only when the user asks ("disconnect my old laptop"). Confirm which one first, by its label and when it was last used, then call `remove_connection` with its id, plus the PIN if `has_pin` is true (`disconnect <id> --pin` reads it from stdin or a hidden prompt). It stops working right away, forwarding it set up stops too, and the user is texted. Removing your own connection (`current: true`) cuts you off.
-- **Sign out everything** removes every key and app sign-in (you included), stops forwarding, and signs the user out of the website on their other browsers. It's only on the website dashboard (aitextaroo.com/dashboard), where the user can also see and remove connected apps, stop forwarding, and set or remove their PIN.
+- **Sign out everything** removes every key and app sign-in (you included), stops forwarding, and signs the user out of the website on their other browsers, except any sign-in newer than the one they pressed it in: the newest sign-in wins. To end one they don't recognize, they sign in again and press it once more. It's only on the website dashboard (aitextaroo.com/dashboard), where the user can also see and remove connected apps, stop forwarding, and set or remove their PIN.
 
 ## Questions about how it works
 
